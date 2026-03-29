@@ -1,0 +1,78 @@
+# MLX Model Manager Configuration
+# Edit this file to list the mlx-community models you have downloaded locally.
+# Restart the manager after any change: make mlx-start
+#
+# name:              identifier clients use in the "model" field of API requests
+# hf_path:           HuggingFace repo ID (must be downloaded to local cache first)
+# type:
+#   "text"           → spawns mlx_lm.server subprocess
+#   "vision"         → spawns mlx_vlm.server subprocess
+#   "embedding"      → in-process via mlx-embeddings
+#   "tts"            → in-process via mlx-audio
+#   "stt"            → in-process via mlx-whisper
+# context_length:    max output tokens per response (--max-tokens); 0 = server default (512)
+# max_kv_cache_size: KV cache token capacity for prompt caching (--max-kv-cache-size);
+#                    limits how many tokens of KV state are retained between requests;
+#                    0 = no limit (model default). Set to e.g. 8192 to cap memory usage.
+
+mlx_port: 8091                    # Internal port used by the active mlx subprocess
+manager_port: 8090                # Port the FastAPI manager listens on
+inactivity_timeout_seconds: 600   # Unload model after 10 min of no requests
+startup_timeout_seconds: 120      # Max wait for model to become READY
+
+models:
+  - name: mlx-qwen3vl-8b
+    type: vision
+    hf_path: mlx-community/Qwen3-VL-8B-Instruct-8bit
+    context_length: 32768
+
+  - name: mlx-qwen2.5-7b
+    type: text
+    hf_path: mlx-community/Qwen2.5-7B-Instruct-4bit
+    context_length: 32768
+
+  - name: mlx-qwen2.5-3b
+    type: text
+    hf_path: mlx-community/Qwen2.5-3B-Instruct-4bit
+    context_length: 32768
+
+  - name: mlx-deepseek-r1-7b
+    type: text
+    hf_path: mlx-community/DeepSeek-R1-Distill-Qwen-7B-4bit
+    context_length: 32768
+
+  - name: mlx-qwen3.5-4b
+    type: text
+    hf_path: mlx-community/Qwen3.5-4B-MLX-8bit
+    context_length: 32768
+
+  - name: mlx-qwen3.5-9b
+    type: text
+    hf_path: mlx-community/Qwen3.5-9B-8bit
+    context_length: 32768
+
+  # --- Embedding models (in-process, mlx-embeddings) ---
+  - name: mlx-qwen3-embedding
+    type: embedding
+    hf_path: Qwen/Qwen3-Embedding-0.6B
+    context_length: 8192
+
+  - name: mlx-qwen3vl-embedding
+    type: embedding
+    hf_path: Qwen/Qwen3-VL-Embedding-2B
+    context_length: 8192
+
+  # --- TTS models (in-process, mlx-audio) ---
+  # Requires: mlx-community/chatterbox-fp16 (download separately — MLX native port of ResembleAI/chatterbox)
+  - name: mlx-chatterbox
+    type: tts
+    hf_path: mlx-community/chatterbox-fp16
+
+  # --- STT models (in-process, mlx-whisper) ---
+  - name: mlx-whisper-large
+    type: stt
+    hf_path: mlx-community/whisper-large-v3-mlx
+
+  - name: mlx-whisper-turbo
+    type: stt
+    hf_path: mlx-community/whisper-large-v3-turbo

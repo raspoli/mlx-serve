@@ -1,0 +1,26 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+dist/
+build/
+*.egg-info/
+
+# macOS
+.DS_Store
+
+# IDE
+.claude/
+.idea/
+.vscode/
+
+# Logs (runtime artifacts — not source)
+*.log
+/tmp/mlx-manager-logs/
+
+# Secrets
+.env
+
+# Internal design specs (not for public repo)
+openspec/

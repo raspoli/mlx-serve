@@ -1,0 +1,48 @@
+[project]
+name = "mlx-manager"
+version = "0.1.0"
+description = "OpenAI-compatible model manager for Apple Silicon — hot-swaps MLX models with strict single-model memory enforcement"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [
+    { name = "mlx-manager contributors" },
+]
+keywords = [
+    "mlx", "apple-silicon", "llm", "openai", "fastapi",
+    "model-manager", "local-llm", "macos",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.29",
+    "httpx>=0.27",
+    "pyyaml>=6.0",
+    "psutil>=5.9",
+    "mlx-lm>=0.14",
+    "mlx-vlm>=0.0.9",
+    "mlx-audio>=0.4.0",
+    "mlx-embeddings>=0.1.0",
+    "mlx-whisper>=0.4.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/your-username/mlx-manager"
+Repository = "https://github.com/your-username/mlx-manager"
+Issues = "https://github.com/your-username/mlx-manager/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]

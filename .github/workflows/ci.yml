@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Syntax & import check
+    # MLX requires Apple Silicon — full inference tests must be run manually.
+    # This job validates Python syntax and that all src modules are importable
+    # without the MLX runtime (guarded imports in inline_manager are lazy).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Install non-MLX dependencies only
+        run: |
+          uv pip install --system \
+            fastapi \
+            uvicorn \
+            httpx \
+            pyyaml \
+            psutil \
+            huggingface-hub
+
+      - name: Compile-check all source files
+        run: python -m py_compile src/config.py src/process_manager.py src/inline_manager.py src/router.py src/main.py
+
+      - name: Verify models.yaml is valid YAML
+        run: python -c "import yaml; yaml.safe_load(open('models.yaml'))"
