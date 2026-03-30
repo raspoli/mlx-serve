@@ -6,15 +6,16 @@ install:
 
 # Start the MLX manager (runs in foreground; Ctrl+C to stop)
 mlx-start:
-	uv run uvicorn main:app --app-dir src --host 0.0.0.0 --port 8095
+	uv run mlx-serve start
 
 # Start with auto-reload on code changes (dev mode)
 mlx-dev:
-	uv run uvicorn main:app --app-dir src --host 0.0.0.0 --port 8095 --reload
+	uv run uvicorn mlx_serve.main:app --host 0.0.0.0 --port 8095 --reload
 
 # Stop any running manager process and any active model subprocesses
 mlx-stop:
-	-pkill -f "uvicorn main:app" 2>/dev/null || true
+	-pkill -f "mlx-serve" 2>/dev/null || true
+	-pkill -f "uvicorn mlx_serve" 2>/dev/null || true
 	-pkill -f "mlx_lm.server"       2>/dev/null || true
 	-pkill -f "mlx_vlm.server"      2>/dev/null || true
 

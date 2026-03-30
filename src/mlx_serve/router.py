@@ -18,11 +18,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Secu
 from fastapi.responses import Response, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-import config
-import events
-import inline_manager
-import metrics
-import process_manager
+from . import config, events, inline_manager, metrics, process_manager
 
 logger = logging.getLogger("mlx-serve.router")
 
@@ -157,7 +153,7 @@ async def health() -> dict:
 async def version() -> dict:
     """Returns the mlx-manager version."""
     try:
-        ver = importlib.metadata.version("mlx-manager")
+        ver = importlib.metadata.version("mlx-serve")
     except importlib.metadata.PackageNotFoundError:
         ver = "0.1.0"
     return {"version": ver}

@@ -36,14 +36,17 @@ dependencies = [
     "mlx-whisper>=0.4.0",
 ]
 
+[project.scripts]
+mlx-serve = "mlx_serve.cli:main"
+
 [project.urls]
-Homepage = "https://github.com/your-username/mlx-manager"
-Repository = "https://github.com/your-username/mlx-manager"
-Issues = "https://github.com/your-username/mlx-manager/issues"
+Homepage = "https://github.com/your-username/mlx-serve"
+Repository = "https://github.com/your-username/mlx-serve"
+Issues = "https://github.com/your-username/mlx-serve/issues"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
+packages = ["src/mlx_serve"]

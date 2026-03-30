@@ -17,9 +17,7 @@ from enum import Enum
 import httpx
 import psutil
 
-import config
-import events
-import metrics
+from . import config, events, metrics
 
 logger = logging.getLogger("mlx-serve.process")
 

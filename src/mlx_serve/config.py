@@ -1,5 +1,11 @@
 """
 config.py — reads models.yaml and exposes typed configuration.
+
+Config discovery order:
+  1. MLX_SERVE_CONFIG env var (explicit override)
+  2. ./models.yaml  (current working directory)
+  3. ~/.mlx-serve/models.yaml  (user config directory)
+  4. Bundled _default_models.yaml inside the package
 """
 import os
 from dataclasses import dataclass
@@ -7,8 +13,41 @@ from pathlib import Path
 
 import yaml
 
-# models.yaml lives in the project root, one level above src/
-_CONFIG_PATH = Path(__file__).parent.parent / "models.yaml"
+
+def _find_config() -> Path:
+    """Locate models.yaml using a fallback chain."""
+    # 1. Explicit env var
+    env_path = os.environ.get("MLX_SERVE_CONFIG")
+    if env_path:
+        p = Path(env_path).expanduser()
+        if p.exists():
+            return p
+        raise FileNotFoundError(f"MLX_SERVE_CONFIG points to {p} which does not exist")
+
+    # 2. Current working directory
+    cwd_path = Path.cwd() / "models.yaml"
+    if cwd_path.exists():
+        return cwd_path
+
+    # 3. User config directory
+    user_path = Path.home() / ".mlx-serve" / "models.yaml"
+    if user_path.exists():
+        return user_path
+
+    # 4. Bundled default
+    bundled = Path(__file__).parent / "_default_models.yaml"
+    if bundled.exists():
+        return bundled
+
+    raise FileNotFoundError(
+        "No models.yaml found. Searched:\n"
+        f"  - {cwd_path}\n"
+        f"  - {user_path}\n"
+        "Run 'mlx-serve init' to generate one."
+    )
+
+
+_CONFIG_PATH = _find_config()
 
 
 @dataclass

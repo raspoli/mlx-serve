@@ -2,9 +2,9 @@
 main.py — FastAPI application entry point for the MLX model manager.
 
 Start with:
-    make mlx-start
+    mlx-serve start
 or:
-    uvicorn main:app --app-dir src --host 0.0.0.0 --port 8090
+    uvicorn mlx_serve.main:app --host 0.0.0.0 --port 8095
 """
 import asyncio
 import logging
@@ -12,16 +12,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-import config
-import events
-import inline_manager
-import logging_config
-import metrics
-import process_manager
-from router import close_client, health as _bare_health, router, status as _bare_status
-from router import get_metrics as _bare_metrics
-from router import get_events as _bare_events
-from router import dashboard as _bare_dashboard
+from . import config, events, inline_manager, logging_config, metrics, process_manager
+from .router import close_client, health as _bare_health, router, status as _bare_status
+from .router import get_metrics as _bare_metrics
+from .router import get_events as _bare_events
+from .router import dashboard as _bare_dashboard
 
 # ---------------------------------------------------------------------------
 # Initialise logging and monitoring subsystems

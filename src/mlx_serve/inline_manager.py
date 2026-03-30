@@ -17,9 +17,7 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any
 
-import config
-import events
-import metrics
+from . import config, events, metrics
 
 logger = logging.getLogger("mlx-serve.inline")
 

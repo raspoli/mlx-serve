@@ -16,7 +16,7 @@ from typing import Any
 
 import psutil
 
-import events
+from . import events
 
 logger = logging.getLogger("mlx-serve.metrics")
 
