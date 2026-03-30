@@ -20,10 +20,20 @@ class ModelConfig:
     max_kv_cache_size: int = 0   # KV cache token capacity for prompt caching (--max-kv-cache-size); 0 = model default
 
 
+@dataclass
+class MonitoringConfig:
+    log_dir: Path
+    metrics_history_size: int = 500
+    events_history_size: int = 1000
+    memory_sample_interval: int = 10     # seconds, in-memory
+    memory_log_interval: int = 60        # seconds, to disk
+    log_retention_mb: int = 50           # per JSONL file
+
+
 _VALID_TYPES = {"text", "vision", "embedding", "tts", "stt"}
 
 
-def _load() -> tuple[dict[str, ModelConfig], int, int, int, int]:
+def _load() -> tuple[dict[str, ModelConfig], int, int, int, int, MonitoringConfig]:
     with open(_CONFIG_PATH) as f:
         data = yaml.safe_load(f)
 
@@ -41,12 +51,27 @@ def _load() -> tuple[dict[str, ModelConfig], int, int, int, int]:
             context_length=entry.get("context_length", 0),
             max_kv_cache_size=entry.get("max_kv_cache_size", 0),
         )
+
+    # Monitoring settings (optional section in models.yaml)
+    mon_raw = data.get("monitoring", {})
+    default_log_dir = Path.home() / ".mlx-serve" / "logs"
+    log_dir_str = mon_raw.get("log_dir", str(default_log_dir))
+    monitoring = MonitoringConfig(
+        log_dir=Path(log_dir_str).expanduser(),
+        metrics_history_size=mon_raw.get("metrics_history_size", 500),
+        events_history_size=mon_raw.get("events_history_size", 1000),
+        memory_sample_interval=mon_raw.get("memory_sample_interval", 10),
+        memory_log_interval=mon_raw.get("memory_log_interval", 60),
+        log_retention_mb=mon_raw.get("log_retention_mb", 50),
+    )
+
     return (
         models,
         data.get("mlx_port", 8091),
-        data.get("manager_port", 8090),
+        data.get("manager_port", 8095),
         data.get("inactivity_timeout_seconds", 600),
         data.get("startup_timeout_seconds", 120),
+        monitoring,
     )
 
 
@@ -56,6 +81,7 @@ def _load() -> tuple[dict[str, ModelConfig], int, int, int, int]:
     MANAGER_PORT,
     INACTIVITY_TIMEOUT,
     STARTUP_TIMEOUT,
+    MONITORING,
 ) = _load()
 
 # Optional bearer token auth. Set MLX_API_KEY env var to enable.

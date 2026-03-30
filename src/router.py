@@ -2,11 +2,14 @@
 router.py — OpenAI-compatible HTTP endpoints for the MLX model manager.
 """
 import importlib.metadata
+import json
+import logging
 import os
 import pathlib
 import sys
 import tempfile
 import time
+import uuid
 from typing import Any
 
 import httpx
@@ -16,14 +19,18 @@ from fastapi.responses import Response, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 import config
+import events
 import inline_manager
+import metrics
 import process_manager
+
+logger = logging.getLogger("mlx-serve.router")
 
 _HTTP_CLIENT = httpx.AsyncClient(timeout=None)
 _LOG_DIR = pathlib.Path(tempfile.gettempdir()) / "mlx-manager-logs"
 _VENV_BIN = os.path.dirname(sys.executable)
 
-# Maps model type → OpenAI-style capabilities array
+# Maps model type -> OpenAI-style capabilities array
 _TYPE_CAPABILITIES: dict[str, list[str]] = {
     "text": ["completion"],
     "vision": ["completion", "vision"],
@@ -239,7 +246,6 @@ async def pull_model(request: Request) -> StreamingResponse:
 
     async def stream():
         import asyncio
-        import json
         yield json.dumps({"status": "pulling", "model": hf_path}) + "\n"
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -395,9 +401,15 @@ async def chat_completions(request: Request) -> Any:
     if keep_alive is not None:
         process_manager.set_keep_alive(keep_alive)
 
+    logger.info(f"POST /v1/chat/completions model={model_name} stream={body.get('stream', False)}")
+
     # Free any in-process model before loading subprocess
     await inline_manager.unload()
-    await process_manager.ensure_model(model_name)
+    request_start = time.monotonic()
+    cold_start = await process_manager.ensure_model(model_name)
+
+    if cold_start:
+        events.emit(events.EventType.REQUEST_COLD_START, model=model_name)
 
     # mlx_lm.server validates the model field against the one it was started with —
     # rewrite it to the HuggingFace path so the request passes through.
@@ -406,22 +418,129 @@ async def chat_completions(request: Request) -> Any:
     target = f"http://127.0.0.1:{config.MLX_PORT}/v1/chat/completions"
 
     if body.get("stream"):
-        return await _stream_response(target, body, request.headers)
+        return await _instrumented_stream_response(
+            target, body, request.headers, model_name, request_start, cold_start,
+        )
     else:
-        return await _proxy_response(target, body, request.headers)
+        return await _instrumented_proxy_response(
+            target, body, request.headers, model_name, request_start, cold_start,
+        )
 
 
-async def _proxy_response(url: str, body: dict, headers) -> Any:
+async def _instrumented_proxy_response(
+    url: str, body: dict, headers, model_name: str, request_start: float, cold_start: bool,
+) -> Any:
+    """Forward non-streaming request and record metrics."""
     from fastapi.responses import JSONResponse
+
+    request_id = str(uuid.uuid4())
     resp = await _HTTP_CLIENT.post(url, json=body, headers=_forward_headers(headers))
-    return JSONResponse(content=resp.json(), status_code=resp.status_code)
+    end = time.monotonic()
+
+    resp_json = resp.json()
+
+    # Extract token counts from response
+    usage = resp_json.get("usage", {})
+    prompt_tokens = usage.get("prompt_tokens")
+    completion_tokens = usage.get("completion_tokens")
+    total_ms = (end - request_start) * 1000
+
+    # Calculate TPS (generation time approximated as total time for non-streaming)
+    tps = None
+    if completion_tokens and completion_tokens > 0 and total_ms > 0:
+        tps = round(completion_tokens / (total_ms / 1000), 1)
+
+    metrics.record_request(metrics.RequestMetrics(
+        request_id=request_id,
+        model=model_name,
+        endpoint="/v1/chat/completions",
+        timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        started_at=request_start,
+        total_duration_ms=round(total_ms, 1),
+        ttft_ms=round(total_ms, 1),  # for non-streaming, TTFT = total time
+        tokens_per_second=tps,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        status_code=resp.status_code,
+        error=resp_json.get("error", {}).get("message") if resp.status_code >= 400 else None,
+        cold_start=cold_start,
+    ))
+
+    return JSONResponse(content=resp_json, status_code=resp.status_code)
 
 
-async def _stream_response(url: str, body: dict, headers) -> StreamingResponse:
+async def _instrumented_stream_response(
+    url: str, body: dict, headers, model_name: str, request_start: float, cold_start: bool,
+) -> StreamingResponse:
+    """Forward streaming request, measure TTFT, and record metrics."""
+    request_id = str(uuid.uuid4())
+    first_token_time: float | None = None
+    completion_tokens = 0
+    prompt_tokens_from_usage: int | None = None
+    completion_tokens_from_usage: int | None = None
+
     async def generate():
+        nonlocal first_token_time, completion_tokens
+        nonlocal prompt_tokens_from_usage, completion_tokens_from_usage
+
         async with _HTTP_CLIENT.stream("POST", url, json=body, headers=_forward_headers(headers)) as resp:
-            async for chunk in resp.aiter_bytes():
-                yield chunk
+            async for chunk in resp.aiter_lines():
+                if not chunk.startswith("data:"):
+                    yield chunk + "\n"
+                    continue
+
+                data_str = chunk[5:].strip()
+                yield chunk + "\n\n"
+
+                if data_str == "[DONE]":
+                    continue
+
+                # Track TTFT and token count
+                try:
+                    data = json.loads(data_str)
+                    choices = data.get("choices", [])
+                    if choices:
+                        delta = choices[0].get("delta", {})
+                        if delta.get("content"):
+                            if first_token_time is None:
+                                first_token_time = time.monotonic()
+                            completion_tokens += 1
+
+                    # mlx_lm may include usage in the final chunk
+                    usage = data.get("usage")
+                    if usage:
+                        prompt_tokens_from_usage = usage.get("prompt_tokens")
+                        completion_tokens_from_usage = usage.get("completion_tokens")
+                except (json.JSONDecodeError, KeyError):
+                    pass
+
+        # Record metrics after stream completes
+        end = time.monotonic()
+        total_ms = (end - request_start) * 1000
+        ttft_ms = (first_token_time - request_start) * 1000 if first_token_time else None
+
+        # Use usage-reported tokens if available, else our chunk count
+        final_completion = completion_tokens_from_usage or completion_tokens
+        tps = None
+        if final_completion and first_token_time:
+            gen_time = end - first_token_time
+            if gen_time > 0:
+                tps = round(final_completion / gen_time, 1)
+
+        metrics.record_request(metrics.RequestMetrics(
+            request_id=request_id,
+            model=model_name,
+            endpoint="/v1/chat/completions",
+            timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            started_at=request_start,
+            total_duration_ms=round(total_ms, 1),
+            ttft_ms=round(ttft_ms, 1) if ttft_ms else None,
+            tokens_per_second=tps,
+            prompt_tokens=prompt_tokens_from_usage,
+            completion_tokens=final_completion if final_completion else None,
+            status_code=200,
+            cold_start=cold_start,
+        ))
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
@@ -443,9 +562,6 @@ async def embeddings(request: Request) -> dict:
         )
 
     # Normalise input into list[dict] for mlx-embeddings:
-    #   "hello"                         → [{"text": "hello"}]
-    #   ["a", "b"]                      → [{"text": "a"}, {"text": "b"}]
-    #   [{"text": "a", "image": "..."}] → passed through unchanged
     if isinstance(input_data, str):
         inputs = [{"text": input_data}]
     elif isinstance(input_data, list):
@@ -460,8 +576,22 @@ async def embeddings(request: Request) -> dict:
     if keep_alive is not None:
         inline_manager.set_keep_alive(keep_alive)
 
+    logger.info(f"POST /v1/embeddings model={model_name} inputs={len(inputs)}")
+    request_start = time.monotonic()
+
     await process_manager.unload()
     vectors = await inline_manager.generate_embeddings(model_name, inputs)
+
+    total_ms = (time.monotonic() - request_start) * 1000
+    metrics.record_request(metrics.RequestMetrics(
+        request_id=str(uuid.uuid4()),
+        model=model_name,
+        endpoint="/v1/embeddings",
+        timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        started_at=request_start,
+        total_duration_ms=round(total_ms, 1),
+        status_code=200,
+    ))
 
     return {
         "object": "list",
@@ -498,8 +628,23 @@ async def audio_speech(request: Request) -> Response:
     if keep_alive is not None:
         inline_manager.set_keep_alive(keep_alive)
 
+    logger.info(f"POST /v1/audio/speech model={model_name} chars={len(text)}")
+    request_start = time.monotonic()
+
     await process_manager.unload()
     wav_bytes = await inline_manager.generate_tts(model_name, text, speed, lang_code)
+
+    total_ms = (time.monotonic() - request_start) * 1000
+    metrics.record_request(metrics.RequestMetrics(
+        request_id=str(uuid.uuid4()),
+        model=model_name,
+        endpoint="/v1/audio/speech",
+        timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        started_at=request_start,
+        total_duration_ms=round(total_ms, 1),
+        status_code=200,
+    ))
+
     return Response(content=wav_bytes, media_type="audio/wav")
 
 
@@ -525,8 +670,23 @@ async def audio_transcriptions(
 
     audio_bytes = await file.read()
 
+    logger.info(f"POST /v1/audio/transcriptions model={model} size={len(audio_bytes)}")
+    request_start = time.monotonic()
+
     await process_manager.unload()
     text = await inline_manager.generate_stt(model, audio_bytes, language or None)
+
+    total_ms = (time.monotonic() - request_start) * 1000
+    metrics.record_request(metrics.RequestMetrics(
+        request_id=str(uuid.uuid4()),
+        model=model,
+        endpoint="/v1/audio/transcriptions",
+        timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        started_at=request_start,
+        total_duration_ms=round(total_ms, 1),
+        status_code=200,
+    ))
+
     return {"text": text}
 
 
@@ -540,6 +700,7 @@ async def status() -> dict:
         "subprocess": process_manager.get_status(),
         "inline": inline_manager.get_status(),
         "memory": _get_memory_stats(),
+        "metal": metrics.get_metal_memory(),
     }
 
 
@@ -561,4 +722,88 @@ async def model_logs(model_name: str) -> dict:
         "model": model_name,
         "log_path": str(log_path),
         "lines": lines[-100:],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Monitoring endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/metrics")
+async def get_metrics() -> dict:
+    """Summary of all metrics: per-model aggregates, current memory, active model."""
+    metal = metrics.get_metal_memory()
+    vm = psutil.virtual_memory()
+    swap = psutil.swap_memory()
+
+    return {
+        "uptime_seconds": process_manager.get_status()["uptime_seconds"],
+        "models": metrics.get_aggregates(),
+        "memory": {
+            "ram_total_gb": round(vm.total / 1e9, 1),
+            "ram_used_gb": round(vm.used / 1e9, 1),
+            "ram_available_gb": round(vm.available / 1e9, 1),
+            "ram_percent": vm.percent,
+            "swap_used_gb": round(swap.used / 1e9, 2),
+            "metal_active_mb": metal.get("active_mb"),
+            "metal_peak_mb": metal.get("peak_mb"),
+            "metal_cache_mb": metal.get("cache_mb"),
+        },
+        "pressure": metrics.check_memory_pressure(),
+        "active_subprocess_model": process_manager.get_active_model_name(),
+        "active_inline_model": inline_manager.get_active_model_name(),
+    }
+
+
+@router.get("/metrics/requests")
+async def get_request_metrics(model: str | None = None, last_n: int = 50) -> dict:
+    """Recent request history with TTFT, TPS, duration."""
+    return {"requests": metrics.get_request_history(model=model, last_n=last_n)}
+
+
+@router.get("/metrics/memory")
+async def get_memory_snapshot() -> dict:
+    """Current memory snapshot: RAM + Metal + subprocess RSS."""
+    return metrics.get_current_memory()
+
+
+@router.get("/metrics/memory/timeline")
+async def get_memory_timeline(last_n: int = 60) -> dict:
+    """Memory history over time (sampled every 10s)."""
+    return {"snapshots": metrics.get_memory_timeline(last_n=last_n)}
+
+
+@router.get("/events")
+async def get_events(
+    model: str | None = None,
+    type: str | None = None,
+    last_n: int = 100,
+) -> dict:
+    """Lifecycle events: model loads, failures, switches, memory pressure."""
+    return {"events": events.get_events(model=model, event_type=type, last_n=last_n)}
+
+
+@router.get("/dashboard")
+async def dashboard() -> dict:
+    """Everything in one call: status, metrics summary, recent events."""
+    metal = metrics.get_metal_memory()
+    vm = psutil.virtual_memory()
+
+    return {
+        "status": {
+            "subprocess": process_manager.get_status(),
+            "inline": inline_manager.get_status(),
+        },
+        "memory": {
+            "ram_used_gb": round(vm.used / 1e9, 1),
+            "ram_available_gb": round(vm.available / 1e9, 1),
+            "ram_percent": vm.percent,
+            "metal_active_mb": metal.get("active_mb"),
+            "metal_peak_mb": metal.get("peak_mb"),
+            "pressure": metrics.check_memory_pressure(),
+        },
+        "metrics_summary": metrics.get_aggregates(),
+        "recent_requests": metrics.get_request_history(last_n=5),
+        "recent_events": events.get_events(last_n=10),
+        "memory_timeline": metrics.get_memory_timeline(last_n=12),
     }
