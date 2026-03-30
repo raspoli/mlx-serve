@@ -1,6 +1,6 @@
 # API Reference
 
-mlx-manager exposes an OpenAI-compatible HTTP API on port `8090`. All endpoints are available under the `/v1` prefix. The `/status` endpoint is also accessible at the root without a prefix.
+mlx-manager exposes an OpenAI-compatible HTTP API on port `8095`. All endpoints are available under the `/v1` prefix. The `/status` endpoint is also accessible at the root without a prefix.
 
 ---
 
@@ -46,7 +46,7 @@ When `MLX_API_KEY` is unset (default), authentication is disabled — safe for l
 Liveness check. Returns `200 OK` immediately. Use this for Docker healthchecks, load balancer probes, or monitoring.
 
 ```bash
-curl http://localhost:8090/health
+curl http://localhost:8095/health
 # → {"status": "ok"}
 ```
 
@@ -59,7 +59,7 @@ Also available at `/v1/health`.
 Returns the manager version string.
 
 ```bash
-curl http://localhost:8090/v1/version
+curl http://localhost:8095/v1/version
 # → {"version": "0.1.0"}
 ```
 
@@ -113,7 +113,7 @@ Returns all models defined in `models.yaml` with their capabilities.
 **Example**
 
 ```bash
-curl http://localhost:8090/v1/models
+curl http://localhost:8095/v1/models
 # or
 make models
 ```
@@ -125,7 +125,7 @@ make models
 Returns only the configured models that are present in the local HuggingFace cache. Use this to check which models are ready to use without triggering a 503.
 
 ```bash
-curl http://localhost:8090/v1/models/local
+curl http://localhost:8095/v1/models/local
 ```
 
 Response has the same shape as `/v1/models` but only includes cached models, with an added `"cached": true` field.
@@ -200,7 +200,7 @@ Force-unload the active model immediately, freeing all memory. Does not wait for
 Delete a model from the local HuggingFace cache to free disk space. Automatically unloads the model first if it is currently active.
 
 ```bash
-curl -X DELETE http://localhost:8090/v1/models/mlx-qwen2.5-7b
+curl -X DELETE http://localhost:8095/v1/models/mlx-qwen2.5-7b
 ```
 
 **Response**
@@ -241,7 +241,7 @@ On error:
 **Example**
 
 ```bash
-curl -X POST http://localhost:8090/v1/models/pull \
+curl -X POST http://localhost:8095/v1/models/pull \
   -H "Content-Type: application/json" \
   -d '{"model": "mlx-community/Qwen2.5-3B-Instruct-4bit"}'
 ```
@@ -295,7 +295,7 @@ Set `"stream": true` to receive a server-sent events stream.
 **Example**
 
 ```bash
-curl http://localhost:8090/v1/chat/completions \
+curl http://localhost:8095/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "mlx-qwen2.5-7b",
@@ -365,7 +365,7 @@ Multimodal input (text + image):
 **Example**
 
 ```bash
-curl http://localhost:8090/v1/embeddings \
+curl http://localhost:8095/v1/embeddings \
   -H "Content-Type: application/json" \
   -d '{"model": "mlx-qwen3-embedding", "input": "Hello world"}'
 ```
@@ -402,7 +402,7 @@ Generates speech from text using a `tts` type model. Returns raw WAV audio.
 **Example**
 
 ```bash
-curl http://localhost:8090/v1/audio/speech \
+curl http://localhost:8095/v1/audio/speech \
   -H "Content-Type: application/json" \
   -d '{"model": "mlx-chatterbox", "input": "Hello, world!"}' \
   --output speech.wav
@@ -431,12 +431,12 @@ Transcribe an audio file to text using an `stt` type model. Accepts any format s
 **Example**
 
 ```bash
-curl http://localhost:8090/v1/audio/transcriptions \
+curl http://localhost:8095/v1/audio/transcriptions \
   -F "file=@recording.wav" \
   -F "model=mlx-whisper-turbo"
 
 # With language hint:
-curl http://localhost:8090/v1/audio/transcriptions \
+curl http://localhost:8095/v1/audio/transcriptions \
   -F "file=@recording.mp3" \
   -F "model=mlx-whisper-large" \
   -F "language=fr"
@@ -490,7 +490,7 @@ Returns the current state of both model managers plus system memory stats. Usefu
 **Example**
 
 ```bash
-curl http://localhost:8090/status | python3 -m json.tool
+curl http://localhost:8095/status | python3 -m json.tool
 # or
 make status
 ```
@@ -502,7 +502,7 @@ make status
 Returns the last 100 lines of the subprocess log for a text or vision model. Logs are written to `/tmp/mlx-manager-logs/<model>.log` and only exist after the model has been loaded at least once.
 
 ```bash
-curl http://localhost:8090/v1/status/logs/mlx-qwen2.5-7b
+curl http://localhost:8095/v1/status/logs/mlx-qwen2.5-7b
 ```
 
 **Response**

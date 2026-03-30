@@ -18,7 +18,7 @@ make install
 ## Running locally
 
 ```bash
-make mlx-start    # start on port 8090
+make mlx-start    # start on port 8095
 make status       # check state
 make mlx-stop     # stop everything
 ```

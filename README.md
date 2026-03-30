@@ -8,7 +8,7 @@
 An OpenAI-compatible model manager for Apple Silicon Macs. It hot-swaps local MLX models on demand — text, vision, embeddings, TTS, and STT — loading exactly one at a time to stay within unified memory limits.
 
 ```
-LiteLLM (Docker) → host.docker.internal:8090 → mlx-manager (Mac host) → MLX model
+LiteLLM (Docker) → host.docker.internal:8095 → mlx-manager (Mac host) → MLX model
 ```
 
 ---
@@ -107,7 +107,7 @@ make status
 make models
 ```
 
-The manager listens on `http://0.0.0.0:8090`.
+The manager listens on `http://0.0.0.0:8095`.
 
 ---
 
@@ -116,7 +116,7 @@ The manager listens on `http://0.0.0.0:8090`.
 ### Chat completion
 
 ```bash
-curl http://localhost:8090/v1/chat/completions \
+curl http://localhost:8095/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "mlx-qwen2.5-7b",
@@ -127,7 +127,7 @@ curl http://localhost:8090/v1/chat/completions \
 ### Embeddings
 
 ```bash
-curl http://localhost:8090/v1/embeddings \
+curl http://localhost:8095/v1/embeddings \
   -H "Content-Type: application/json" \
   -d '{"model": "mlx-qwen3-embedding", "input": "Hello world"}'
 ```
@@ -135,7 +135,7 @@ curl http://localhost:8090/v1/embeddings \
 ### Text-to-speech
 
 ```bash
-curl http://localhost:8090/v1/audio/speech \
+curl http://localhost:8095/v1/audio/speech \
   -H "Content-Type: application/json" \
   -d '{"model": "mlx-chatterbox", "input": "Hello from Apple Silicon."}' \
   --output speech.wav
@@ -144,7 +144,7 @@ curl http://localhost:8090/v1/audio/speech \
 ### Speech-to-text
 
 ```bash
-curl http://localhost:8090/v1/audio/transcriptions \
+curl http://localhost:8095/v1/audio/transcriptions \
   -F "file=@recording.wav" \
   -F "model=mlx-whisper-turbo"
 ```
@@ -152,7 +152,7 @@ curl http://localhost:8090/v1/audio/transcriptions \
 ### Streaming
 
 ```bash
-curl http://localhost:8090/v1/chat/completions \
+curl http://localhost:8095/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "mlx-qwen2.5-7b",
@@ -173,13 +173,13 @@ model_list:
   - model_name: mlx-qwen2.5-7b
     litellm_params:
       model: openai/mlx-qwen2.5-7b
-      api_base: http://host.docker.internal:8090/v1
+      api_base: http://host.docker.internal:8095/v1
       api_key: none
 
   - model_name: mlx-qwen3-embedding
     litellm_params:
       model: openai/mlx-qwen3-embedding
-      api_base: http://host.docker.internal:8090/v1
+      api_base: http://host.docker.internal:8095/v1
       api_key: none
 ```
 
@@ -190,7 +190,7 @@ model_list:
 | Command | Description |
 |---------|-------------|
 | `make install` | Install dependencies |
-| `make mlx-start` | Start manager on port 8090 (foreground) |
+| `make mlx-start` | Start manager on port 8095 (foreground) |
 | `make mlx-dev` | Start with auto-reload on code changes |
 | `make mlx-stop` | Kill manager and any active subprocess |
 | `make status` | Print current model state as JSON |

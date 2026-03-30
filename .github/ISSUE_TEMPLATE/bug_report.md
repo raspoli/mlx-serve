@@ -25,7 +25,7 @@ What you expected to happen.
 If the model failed to load, paste the log:
 
 ```bash
-curl http://localhost:8090/v1/status/logs/<model-name>
+curl http://localhost:8095/v1/status/logs/<model-name>
 # or
 cat /tmp/mlx-manager-logs/<model-name>.log
 ```
@@ -42,5 +42,5 @@ paste here
 - Mac model (e.g. M2 Pro, M3 Max):
 - Unified memory (GB):
 - Python version (`python3 --version`):
-- mlx-manager version (`curl http://localhost:8090/v1/version`):
+- mlx-manager version (`curl http://localhost:8095/v1/version`):
 - mlx-lm version (`uv run python -c "import mlx_lm; print(mlx_lm.__version__)"`):

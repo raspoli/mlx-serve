@@ -8,7 +8,7 @@ mlx-manager is a thin FastAPI proxy that sits between a client (typically LiteLL
 ┌──────────────────────────────────────────────────────────────┐
 │  Client  (LiteLLM in Docker / curl / any OpenAI SDK)         │
 └──────────────────────────────────────────────────────────────┘
-                          │  HTTP  (port 8090)
+                          │  HTTP  (port 8095)
                           ▼
 ┌──────────────────────────────────────────────────────────────┐
 │  mlx-manager  (FastAPI, Mac host)                            │
@@ -47,7 +47,7 @@ FastAPI application entry point. Owns the app lifespan:
 Reads `models.yaml` at import time and exposes typed constants used across all modules:
 - `MODELS` — dict of model name → `ModelConfig`
 - `MLX_PORT` — internal subprocess port (default 8091)
-- `MANAGER_PORT` — FastAPI listen port (default 8090)
+- `MANAGER_PORT` — FastAPI listen port (default 8095)
 - `INACTIVITY_TIMEOUT` — seconds before idle model is unloaded (default 600)
 - `STARTUP_TIMEOUT` — max seconds to wait for model to become ready (default 120)
 

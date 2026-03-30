@@ -27,7 +27,7 @@ make install
 | Command | Description |
 |---------|-------------|
 | `make install` | Install / sync dependencies via `uv sync` |
-| `make mlx-start` | Start the manager on port 8090 (foreground, Ctrl+C to stop) |
+| `make mlx-start` | Start the manager on port 8095 (foreground, Ctrl+C to stop) |
 | `make mlx-dev` | Start with `--reload` (auto-restarts on code changes) |
 | `make mlx-stop` | Kill manager and any active subprocess |
 | `make status` | Print current model state as formatted JSON |
@@ -126,7 +126,7 @@ make mlx-start
 ### Port already in use
 
 ```bash
-lsof -i :8090    # find what's using the manager port
+lsof -i :8095    # find what's using the manager port
 lsof -i :8091    # find what's using the subprocess port
 ```
 
@@ -143,7 +143,7 @@ model_list:
   - model_name: mlx-qwen2.5-7b
     litellm_params:
       model: openai/mlx-qwen2.5-7b
-      api_base: http://host.docker.internal:8090/v1
+      api_base: http://host.docker.internal:8095/v1
       api_key: none
 ```
 

@@ -16,7 +16,7 @@
 #                    0 = no limit (model default). Set to e.g. 8192 to cap memory usage.
 
 mlx_port: 8091                    # Internal port used by the active mlx subprocess
-manager_port: 8090                # Port the FastAPI manager listens on
+manager_port: 8095                # Port the FastAPI manager listens on
 inactivity_timeout_seconds: 600   # Unload model after 10 min of no requests
 startup_timeout_seconds: 120      # Max wait for model to become READY
 

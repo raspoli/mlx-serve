@@ -9,7 +9,7 @@ All configuration lives in `models.yaml` at the project root. The file is read o
 ```yaml
 # Top-level runtime settings
 mlx_port: 8091
-manager_port: 8090
+manager_port: 8095
 inactivity_timeout_seconds: 600
 startup_timeout_seconds: 120
 
@@ -26,7 +26,7 @@ models:
 | Field | Default | Description |
 |-------|---------|-------------|
 | `mlx_port` | `8091` | Internal port used by the active subprocess model. Only one subprocess runs at a time; this port is always the same. Loopback only (`127.0.0.1`). |
-| `manager_port` | `8090` | Port the FastAPI manager listens on. Clients (LiteLLM, curl) connect here. |
+| `manager_port` | `8095` | Port the FastAPI manager listens on. Clients (LiteLLM, curl) connect here. |
 | `inactivity_timeout_seconds` | `600` | Seconds of no requests before an idle model is unloaded. Frees unified memory. |
 | `startup_timeout_seconds` | `120` | Maximum seconds to wait for a subprocess model to become ready. If exceeded, the request returns 503 and the next request retries the load. |
 
