@@ -3,15 +3,16 @@ process_manager.py — subprocess lifecycle for the active mlx model.
 
 State machine: IDLE -> LOADING -> READY / FAILED -> IDLE (on inactivity/shutdown)
 """
+
 import asyncio
+import contextlib
 import logging
-import os
 import pathlib
 import subprocess
 import sys
 import tempfile
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 
 import httpx
@@ -23,9 +24,9 @@ logger = logging.getLogger("mlx-serve.process")
 
 # Resolve executable paths relative to the running venv so subprocesses
 # inherit the same environment that has mlx_lm / mlx_vlm installed.
-_VENV_BIN = os.path.dirname(sys.executable)
-_MLX_LM_SERVER = os.path.join(_VENV_BIN, "mlx_lm.server")
-_MLX_VLM_SERVER = os.path.join(_VENV_BIN, "mlx_vlm.server")
+_VENV_BIN = pathlib.Path(sys.executable).parent
+_MLX_LM_SERVER = _VENV_BIN / "mlx_lm.server"
+_MLX_VLM_SERVER = _VENV_BIN / "mlx_vlm.server"
 
 _LOG_DIR = pathlib.Path(tempfile.gettempdir()) / "mlx-manager-logs"
 
@@ -47,7 +48,7 @@ _process: subprocess.Popen | None = None
 _ready_event: asyncio.Event = asyncio.Event()
 _switch_lock: asyncio.Lock = asyncio.Lock()
 _last_request_at: datetime | None = None
-_started_at: datetime = datetime.now(timezone.utc)
+_started_at: datetime = datetime.now(UTC)
 _stderr_log_path: pathlib.Path | None = None
 _stderr_log_handle = None
 _inactivity_timeout: int = config.INACTIVITY_TIMEOUT  # overridable per-request
@@ -61,11 +62,20 @@ _loading_started_at: float | None = None  # monotonic time when loading began
 
 def _build_command(model_cfg: config.ModelConfig) -> list[str]:
     executable = _MLX_VLM_SERVER if model_cfg.type == "vision" else _MLX_LM_SERVER
+    if not executable.exists():
+        pkg = "mlx-vlm" if model_cfg.type == "vision" else "mlx-lm"
+        extra = "vision" if model_cfg.type == "vision" else "text"
+        raise RuntimeError(
+            f"{pkg} is not installed (expected: {executable}). Run: pip install mlx-serve[{extra}]"
+        )
     cmd = [
-        executable,
-        "--model", model_cfg.hf_path,
-        "--host", "127.0.0.1",
-        "--port", str(config.MLX_PORT),
+        str(executable),
+        "--model",
+        model_cfg.hf_path,
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(config.MLX_PORT),
     ]
     if model_cfg.context_length > 0:
         cmd += ["--max-tokens", str(model_cfg.context_length)]
@@ -115,7 +125,7 @@ async def _terminate_current() -> None:
                 asyncio.get_running_loop().run_in_executor(None, _process.wait),
                 timeout=5,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(f"Subprocess did not exit gracefully, killing pid={_process.pid}")
             _process.kill()
             await asyncio.get_running_loop().run_in_executor(None, _process.wait)
@@ -143,15 +153,17 @@ async def _terminate_current() -> None:
 async def _health_check_loop() -> None:
     """Poll /health every 2s until READY or startup timeout."""
     global _state
-    deadline = datetime.now(timezone.utc) + timedelta(seconds=config.STARTUP_TIMEOUT)
+    deadline = datetime.now(UTC) + timedelta(seconds=config.STARTUP_TIMEOUT)
     async with httpx.AsyncClient() as client:
-        while datetime.now(timezone.utc) < deadline:
+        while datetime.now(UTC) < deadline:
             # Detect early process exit
             if _process is not None and _process.poll() is not None:
                 _state = ModelState.FAILED
                 _ready_event.set()
                 detail = _diagnose_failure()
-                load_ms = (time.monotonic() - _loading_started_at) * 1000 if _loading_started_at else None
+                load_ms = (
+                    (time.monotonic() - _loading_started_at) * 1000 if _loading_started_at else None
+                )
                 events.emit(
                     events.EventType.MODEL_FAILED,
                     model=_active_model,
@@ -177,7 +189,11 @@ async def _health_check_loop() -> None:
                 if resp.status_code == 200:
                     _state = ModelState.READY
                     _ready_event.set()
-                    load_ms = (time.monotonic() - _loading_started_at) * 1000 if _loading_started_at else None
+                    load_ms = (
+                        (time.monotonic() - _loading_started_at) * 1000
+                        if _loading_started_at
+                        else None
+                    )
 
                     # Memory snapshot after model is loaded
                     pid = _process.pid if _process else None
@@ -255,7 +271,7 @@ async def _switch_model(model_name: str) -> None:
 
         _LOG_DIR.mkdir(exist_ok=True)
         _stderr_log_path = _LOG_DIR / f"{model_name}.log"
-        _stderr_log_handle = open(_stderr_log_path, "w")
+        _stderr_log_handle = _stderr_log_path.open("w")
 
         cmd = _build_command(model_cfg)
         logger.info(f"Spawning: {' '.join(cmd)}")
@@ -296,7 +312,7 @@ async def ensure_model(model_name: str) -> bool:
     global _last_request_at
 
     if _active_model == model_name and _state == ModelState.READY:
-        _last_request_at = datetime.now(timezone.utc)
+        _last_request_at = datetime.now(UTC)
         return False  # already warm
 
     cold_start = True
@@ -305,16 +321,15 @@ async def ensure_model(model_name: str) -> bool:
         await _switch_model(model_name)
 
     if _state == ModelState.LOADING:
-        try:
+        with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(_ready_event.wait(), timeout=config.STARTUP_TIMEOUT + 5)
-        except asyncio.TimeoutError:
-            pass
 
     if _state == ModelState.FAILED:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=503, detail=f"Model {model_name} failed to load")
 
-    _last_request_at = datetime.now(timezone.utc)
+    _last_request_at = datetime.now(UTC)
     return cold_start
 
 
@@ -331,10 +346,9 @@ async def start_inactivity_watcher() -> None:
         if (
             _state == ModelState.READY
             and _last_request_at is not None
-            and datetime.now(timezone.utc) - _last_request_at
-            > timedelta(seconds=_inactivity_timeout)
+            and datetime.now(UTC) - _last_request_at > timedelta(seconds=_inactivity_timeout)
         ):
-            idle_secs = int((datetime.now(timezone.utc) - _last_request_at).total_seconds())
+            idle_secs = int((datetime.now(UTC) - _last_request_at).total_seconds())
             events.emit(
                 events.EventType.MODEL_INACTIVITY_UNLOAD,
                 model=_active_model,
@@ -364,7 +378,7 @@ def get_status() -> dict:
         "pid": _process.pid if _process else None,
         "last_request_at": _last_request_at.isoformat() if _last_request_at else None,
         "unload_at": unload_at,
-        "uptime_seconds": int((datetime.now(timezone.utc) - _started_at).total_seconds()),
+        "uptime_seconds": int((datetime.now(UTC) - _started_at).total_seconds()),
         "inactivity_timeout_seconds": _inactivity_timeout,
     }
 

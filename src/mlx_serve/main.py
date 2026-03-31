@@ -6,6 +6,7 @@ Start with:
 or:
     uvicorn mlx_serve.main:app --host 0.0.0.0 --port 8095
 """
+
 import asyncio
 import logging
 from contextlib import asynccontextmanager
@@ -13,10 +14,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from . import config, events, inline_manager, logging_config, metrics, process_manager
-from .router import close_client, health as _bare_health, router, status as _bare_status
-from .router import get_metrics as _bare_metrics
-from .router import get_events as _bare_events
+from .router import close_client, router
 from .router import dashboard as _bare_dashboard
+from .router import get_events as _bare_events
+from .router import get_metrics as _bare_metrics
+from .router import health as _bare_health
+from .router import status as _bare_status
 
 # ---------------------------------------------------------------------------
 # Initialise logging and monitoring subsystems

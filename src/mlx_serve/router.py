@@ -1,10 +1,9 @@
 """
 router.py — OpenAI-compatible HTTP endpoints for the MLX model manager.
 """
-import importlib.metadata
+
 import json
 import logging
-import os
 import pathlib
 import sys
 import tempfile
@@ -24,7 +23,7 @@ logger = logging.getLogger("mlx-serve.router")
 
 _HTTP_CLIENT = httpx.AsyncClient(timeout=None)
 _LOG_DIR = pathlib.Path(tempfile.gettempdir()) / "mlx-manager-logs"
-_VENV_BIN = os.path.dirname(sys.executable)
+_VENV_BIN = pathlib.Path(sys.executable).parent
 
 # Maps model type -> OpenAI-style capabilities array
 _TYPE_CAPABILITIES: dict[str, list[str]] = {
@@ -67,6 +66,7 @@ router = APIRouter(dependencies=[Depends(_require_auth)])
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _parse_keep_alive(value: str | int | float | None) -> int | None:
     """
@@ -130,6 +130,7 @@ def _get_memory_stats() -> dict:
 def _scan_cached_hf_paths() -> set[str]:
     try:
         from huggingface_hub import scan_cache_dir
+
         return {repo.repo_id for repo in scan_cache_dir().repos}
     except Exception:
         return set()
@@ -138,6 +139,7 @@ def _scan_cached_hf_paths() -> set[str]:
 # ---------------------------------------------------------------------------
 # GET /health  (also registered at bare /health in main.py — no auth there)
 # ---------------------------------------------------------------------------
+
 
 @router.get("/health")
 async def health() -> dict:
@@ -149,19 +151,19 @@ async def health() -> dict:
 # GET /version
 # ---------------------------------------------------------------------------
 
+
 @router.get("/version")
 async def version() -> dict:
-    """Returns the mlx-manager version."""
-    try:
-        ver = importlib.metadata.version("mlx-serve")
-    except importlib.metadata.PackageNotFoundError:
-        ver = "0.1.0"
-    return {"version": ver}
+    """Returns the mlx-serve version."""
+    from . import __version__
+
+    return {"version": __version__}
 
 
 # ---------------------------------------------------------------------------
 # GET /models
 # ---------------------------------------------------------------------------
+
 
 @router.get("/models")
 async def list_models() -> dict:
@@ -184,6 +186,7 @@ async def list_models() -> dict:
 # ---------------------------------------------------------------------------
 # GET /models/local  — must be registered BEFORE /models/{model_id}
 # ---------------------------------------------------------------------------
+
 
 @router.get("/models/local")
 async def list_local_models() -> dict:
@@ -210,6 +213,7 @@ async def list_local_models() -> dict:
 # GET /models/{model_id}
 # ---------------------------------------------------------------------------
 
+
 @router.get("/models/{model_id}")
 async def get_model(model_id: str) -> dict:
     """Return full detail for a single configured model including cache status."""
@@ -227,6 +231,7 @@ async def get_model(model_id: str) -> dict:
 # POST /models/pull
 # ---------------------------------------------------------------------------
 
+
 @router.post("/models/pull")
 async def pull_model(request: Request) -> StreamingResponse:
     """
@@ -236,16 +241,21 @@ async def pull_model(request: Request) -> StreamingResponse:
     body = await request.json()
     hf_path: str = body.get("model", "").strip()
     if not hf_path:
-        raise HTTPException(status_code=400, detail={"error": {"message": "model field is required"}})
+        raise HTTPException(
+            status_code=400, detail={"error": {"message": "model field is required"}}
+        )
 
-    hf_cli = os.path.join(_VENV_BIN, "huggingface-cli")
+    hf_cli = str(_VENV_BIN / "huggingface-cli")
 
     async def stream():
         import asyncio
+
         yield json.dumps({"status": "pulling", "model": hf_path}) + "\n"
         try:
             proc = await asyncio.create_subprocess_exec(
-                hf_cli, "download", hf_path,
+                hf_cli,
+                "download",
+                hf_path,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
@@ -257,7 +267,9 @@ async def pull_model(request: Request) -> StreamingResponse:
             if proc.returncode == 0:
                 yield json.dumps({"status": "done", "model": hf_path}) + "\n"
             else:
-                yield json.dumps({"status": "error", "error": f"exit code {proc.returncode}"}) + "\n"
+                yield (
+                    json.dumps({"status": "error", "error": f"exit code {proc.returncode}"}) + "\n"
+                )
         except Exception as exc:
             yield json.dumps({"status": "error", "error": str(exc)}) + "\n"
 
@@ -267,6 +279,7 @@ async def pull_model(request: Request) -> StreamingResponse:
 # ---------------------------------------------------------------------------
 # POST /models/load  — pre-warm a model without inference
 # ---------------------------------------------------------------------------
+
 
 @router.post("/models/load")
 async def load_model(request: Request) -> dict:
@@ -305,6 +318,7 @@ async def load_model(request: Request) -> dict:
 # POST /models/unload  — force-free memory now
 # ---------------------------------------------------------------------------
 
+
 @router.post("/models/unload")
 async def unload_model(request: Request) -> dict:
     """
@@ -327,6 +341,7 @@ async def unload_model(request: Request) -> dict:
 # DELETE /models/{model_id}  — remove from HuggingFace disk cache
 # ---------------------------------------------------------------------------
 
+
 @router.delete("/models/{model_id}")
 async def delete_model(model_id: str) -> dict:
     """
@@ -347,12 +362,17 @@ async def delete_model(model_id: str) -> dict:
 
     try:
         from huggingface_hub import scan_cache_dir
+
         cache_info = scan_cache_dir()
         repos = [r for r in cache_info.repos if r.repo_id == model_cfg.hf_path]
         if not repos:
             raise HTTPException(
                 status_code=404,
-                detail={"error": {"message": f"Model '{model_id}' is not in the local HuggingFace cache"}},
+                detail={
+                    "error": {
+                        "message": f"Model '{model_id}' is not in the local HuggingFace cache"
+                    }
+                },
             )
         commit_hashes = [rev.commit_hash for repo in repos for rev in repo.revisions]
         strategy = cache_info.delete_revisions(*commit_hashes)
@@ -372,12 +392,15 @@ async def delete_model(model_id: str) -> dict:
 # POST /chat/completions
 # ---------------------------------------------------------------------------
 
+
 @router.post("/chat/completions")
 async def chat_completions(request: Request) -> Any:
     try:
         body = await request.json()
     except Exception:
-        raise HTTPException(status_code=400, detail={"error": {"message": "Request body must be valid JSON"}})
+        raise HTTPException(
+            status_code=400, detail={"error": {"message": "Request body must be valid JSON"}}
+        )
 
     model_name: str = body.get("model", "")
     if model_name not in config.MODELS:
@@ -390,7 +413,12 @@ async def chat_completions(request: Request) -> Any:
     if model_cfg.type not in ("text", "vision"):
         raise HTTPException(
             status_code=404,
-            detail={"error": {"message": f"Model '{model_name}' has type '{model_cfg.type}' — use the correct endpoint", "code": 404}},
+            detail={
+                "error": {
+                    "message": f"Model '{model_name}' has type '{model_cfg.type}' — use the correct endpoint",
+                    "code": 404,
+                }
+            },
         )
 
     keep_alive = _parse_keep_alive(body.get("keep_alive"))
@@ -415,16 +443,31 @@ async def chat_completions(request: Request) -> Any:
 
     if body.get("stream"):
         return await _instrumented_stream_response(
-            target, body, request.headers, model_name, request_start, cold_start,
+            target,
+            body,
+            request.headers,
+            model_name,
+            request_start,
+            cold_start,
         )
     else:
         return await _instrumented_proxy_response(
-            target, body, request.headers, model_name, request_start, cold_start,
+            target,
+            body,
+            request.headers,
+            model_name,
+            request_start,
+            cold_start,
         )
 
 
 async def _instrumented_proxy_response(
-    url: str, body: dict, headers, model_name: str, request_start: float, cold_start: bool,
+    url: str,
+    body: dict,
+    headers,
+    model_name: str,
+    request_start: float,
+    cold_start: bool,
 ) -> Any:
     """Forward non-streaming request and record metrics."""
     from fastapi.responses import JSONResponse
@@ -446,27 +489,34 @@ async def _instrumented_proxy_response(
     if completion_tokens and completion_tokens > 0 and total_ms > 0:
         tps = round(completion_tokens / (total_ms / 1000), 1)
 
-    metrics.record_request(metrics.RequestMetrics(
-        request_id=request_id,
-        model=model_name,
-        endpoint="/v1/chat/completions",
-        timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        started_at=request_start,
-        total_duration_ms=round(total_ms, 1),
-        ttft_ms=round(total_ms, 1),  # for non-streaming, TTFT = total time
-        tokens_per_second=tps,
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        status_code=resp.status_code,
-        error=resp_json.get("error", {}).get("message") if resp.status_code >= 400 else None,
-        cold_start=cold_start,
-    ))
+    metrics.record_request(
+        metrics.RequestMetrics(
+            request_id=request_id,
+            model=model_name,
+            endpoint="/v1/chat/completions",
+            timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            started_at=request_start,
+            total_duration_ms=round(total_ms, 1),
+            ttft_ms=round(total_ms, 1),  # for non-streaming, TTFT = total time
+            tokens_per_second=tps,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            status_code=resp.status_code,
+            error=resp_json.get("error", {}).get("message") if resp.status_code >= 400 else None,
+            cold_start=cold_start,
+        )
+    )
 
     return JSONResponse(content=resp_json, status_code=resp.status_code)
 
 
 async def _instrumented_stream_response(
-    url: str, body: dict, headers, model_name: str, request_start: float, cold_start: bool,
+    url: str,
+    body: dict,
+    headers,
+    model_name: str,
+    request_start: float,
+    cold_start: bool,
 ) -> StreamingResponse:
     """Forward streaming request, measure TTFT, and record metrics."""
     request_id = str(uuid.uuid4())
@@ -479,7 +529,9 @@ async def _instrumented_stream_response(
         nonlocal first_token_time, completion_tokens
         nonlocal prompt_tokens_from_usage, completion_tokens_from_usage
 
-        async with _HTTP_CLIENT.stream("POST", url, json=body, headers=_forward_headers(headers)) as resp:
+        async with _HTTP_CLIENT.stream(
+            "POST", url, json=body, headers=_forward_headers(headers)
+        ) as resp:
             async for chunk in resp.aiter_lines():
                 if not chunk.startswith("data:"):
                     yield chunk + "\n"
@@ -523,20 +575,22 @@ async def _instrumented_stream_response(
             if gen_time > 0:
                 tps = round(final_completion / gen_time, 1)
 
-        metrics.record_request(metrics.RequestMetrics(
-            request_id=request_id,
-            model=model_name,
-            endpoint="/v1/chat/completions",
-            timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            started_at=request_start,
-            total_duration_ms=round(total_ms, 1),
-            ttft_ms=round(ttft_ms, 1) if ttft_ms else None,
-            tokens_per_second=tps,
-            prompt_tokens=prompt_tokens_from_usage,
-            completion_tokens=final_completion if final_completion else None,
-            status_code=200,
-            cold_start=cold_start,
-        ))
+        metrics.record_request(
+            metrics.RequestMetrics(
+                request_id=request_id,
+                model=model_name,
+                endpoint="/v1/chat/completions",
+                timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                started_at=request_start,
+                total_duration_ms=round(total_ms, 1),
+                ttft_ms=round(ttft_ms, 1) if ttft_ms else None,
+                tokens_per_second=tps,
+                prompt_tokens=prompt_tokens_from_usage,
+                completion_tokens=final_completion if final_completion else None,
+                status_code=200,
+                cold_start=cold_start,
+            )
+        )
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
@@ -544,6 +598,7 @@ async def _instrumented_stream_response(
 # ---------------------------------------------------------------------------
 # POST /embeddings
 # ---------------------------------------------------------------------------
+
 
 @router.post("/embeddings")
 async def embeddings(request: Request) -> dict:
@@ -561,10 +616,7 @@ async def embeddings(request: Request) -> dict:
     if isinstance(input_data, str):
         inputs = [{"text": input_data}]
     elif isinstance(input_data, list):
-        inputs = [
-            item if isinstance(item, dict) else {"text": item}
-            for item in input_data
-        ]
+        inputs = [item if isinstance(item, dict) else {"text": item} for item in input_data]
     else:
         inputs = [{"text": str(input_data)}]
 
@@ -579,21 +631,22 @@ async def embeddings(request: Request) -> dict:
     vectors = await inline_manager.generate_embeddings(model_name, inputs)
 
     total_ms = (time.monotonic() - request_start) * 1000
-    metrics.record_request(metrics.RequestMetrics(
-        request_id=str(uuid.uuid4()),
-        model=model_name,
-        endpoint="/v1/embeddings",
-        timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        started_at=request_start,
-        total_duration_ms=round(total_ms, 1),
-        status_code=200,
-    ))
+    metrics.record_request(
+        metrics.RequestMetrics(
+            request_id=str(uuid.uuid4()),
+            model=model_name,
+            endpoint="/v1/embeddings",
+            timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            started_at=request_start,
+            total_duration_ms=round(total_ms, 1),
+            status_code=200,
+        )
+    )
 
     return {
         "object": "list",
         "data": [
-            {"object": "embedding", "index": i, "embedding": vec}
-            for i, vec in enumerate(vectors)
+            {"object": "embedding", "index": i, "embedding": vec} for i, vec in enumerate(vectors)
         ],
         "model": model_name,
     }
@@ -602,6 +655,7 @@ async def embeddings(request: Request) -> dict:
 # ---------------------------------------------------------------------------
 # POST /audio/speech  (TTS)
 # ---------------------------------------------------------------------------
+
 
 @router.post("/audio/speech")
 async def audio_speech(request: Request) -> Response:
@@ -612,7 +666,9 @@ async def audio_speech(request: Request) -> Response:
     lang_code: str = body.get("language", "en")
 
     if not text:
-        raise HTTPException(status_code=400, detail={"error": {"message": "input text is required"}})
+        raise HTTPException(
+            status_code=400, detail={"error": {"message": "input text is required"}}
+        )
 
     if model_name not in config.MODELS or config.MODELS[model_name].type != "tts":
         raise HTTPException(
@@ -631,15 +687,17 @@ async def audio_speech(request: Request) -> Response:
     wav_bytes = await inline_manager.generate_tts(model_name, text, speed, lang_code)
 
     total_ms = (time.monotonic() - request_start) * 1000
-    metrics.record_request(metrics.RequestMetrics(
-        request_id=str(uuid.uuid4()),
-        model=model_name,
-        endpoint="/v1/audio/speech",
-        timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        started_at=request_start,
-        total_duration_ms=round(total_ms, 1),
-        status_code=200,
-    ))
+    metrics.record_request(
+        metrics.RequestMetrics(
+            request_id=str(uuid.uuid4()),
+            model=model_name,
+            endpoint="/v1/audio/speech",
+            timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            started_at=request_start,
+            total_duration_ms=round(total_ms, 1),
+            status_code=200,
+        )
+    )
 
     return Response(content=wav_bytes, media_type="audio/wav")
 
@@ -647,6 +705,7 @@ async def audio_speech(request: Request) -> Response:
 # ---------------------------------------------------------------------------
 # POST /audio/transcriptions  (STT)
 # ---------------------------------------------------------------------------
+
 
 @router.post("/audio/transcriptions")
 async def audio_transcriptions(
@@ -673,15 +732,17 @@ async def audio_transcriptions(
     text = await inline_manager.generate_stt(model, audio_bytes, language or None)
 
     total_ms = (time.monotonic() - request_start) * 1000
-    metrics.record_request(metrics.RequestMetrics(
-        request_id=str(uuid.uuid4()),
-        model=model,
-        endpoint="/v1/audio/transcriptions",
-        timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        started_at=request_start,
-        total_duration_ms=round(total_ms, 1),
-        status_code=200,
-    ))
+    metrics.record_request(
+        metrics.RequestMetrics(
+            request_id=str(uuid.uuid4()),
+            model=model,
+            endpoint="/v1/audio/transcriptions",
+            timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            started_at=request_start,
+            total_duration_ms=round(total_ms, 1),
+            status_code=200,
+        )
+    )
 
     return {"text": text}
 
@@ -689,6 +750,7 @@ async def audio_transcriptions(
 # ---------------------------------------------------------------------------
 # GET /status
 # ---------------------------------------------------------------------------
+
 
 @router.get("/status")
 async def status() -> dict:
@@ -704,6 +766,7 @@ async def status() -> dict:
 # GET /status/logs/{model_name}
 # ---------------------------------------------------------------------------
 
+
 @router.get("/status/logs/{model_name}")
 async def model_logs(model_name: str) -> dict:
     """Return the last 100 lines of the subprocess log for the given model."""
@@ -711,7 +774,11 @@ async def model_logs(model_name: str) -> dict:
     if not log_path.exists():
         raise HTTPException(
             status_code=404,
-            detail={"error": {"message": f"No logs found for '{model_name}'. Logs are only written for subprocess models (text/vision) that have been loaded."}},
+            detail={
+                "error": {
+                    "message": f"No logs found for '{model_name}'. Logs are only written for subprocess models (text/vision) that have been loaded."
+                }
+            },
         )
     lines = log_path.read_text().splitlines()
     return {
@@ -724,6 +791,7 @@ async def model_logs(model_name: str) -> dict:
 # ---------------------------------------------------------------------------
 # Monitoring endpoints
 # ---------------------------------------------------------------------------
+
 
 @router.get("/metrics")
 async def get_metrics() -> dict:

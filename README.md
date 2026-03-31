@@ -1,113 +1,97 @@
-# mlx-manager
+# mlx-serve
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org)
+[![PyPI version](https://img.shields.io/pypi/v/mlx-serve)](https://pypi.org/project/mlx-serve/)
+[![Python versions](https://img.shields.io/pypi/pyversions/mlx-serve)](https://pypi.org/project/mlx-serve/)
+[![License](https://img.shields.io/pypi/l/mlx-serve)](https://github.com/raspoli/mlx-serve/blob/main/LICENSE)
+[![CI](https://github.com/raspoli/mlx-serve/actions/workflows/ci.yml/badge.svg)](https://github.com/raspoli/mlx-serve/actions/workflows/ci.yml)
 [![Platform](https://img.shields.io/badge/platform-Apple%20Silicon-black?logo=apple)](https://developer.apple.com/metal/)
-[![CI](https://github.com/your-username/mlx-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/your-username/mlx-manager/actions/workflows/ci.yml)
 
-An OpenAI-compatible model manager for Apple Silicon Macs. It hot-swaps local MLX models on demand — text, vision, embeddings, TTS, and STT — loading exactly one at a time to stay within unified memory limits.
+Local inference server for Apple Silicon that hot-swaps MLX models on demand — text, vision, embeddings, TTS, and STT — loading exactly one at a time to stay within unified memory limits.
 
 ```
-LiteLLM (Docker) → host.docker.internal:8095 → mlx-manager (Mac host) → MLX model
+Client / LiteLLM  -->  mlx-serve (port 8095)  -->  MLX model (one at a time)
 ```
 
 ---
 
-## The Problem
+## Install
 
-MLX models consume large amounts of Apple Silicon unified memory. Running two simultaneously exhausts RAM. Most local model tools either load everything at once, use LRU caches that still allow overlap, or don't support the full MLX stack (text + vision + embeddings + TTS).
+```bash
+pip install mlx-serve[all]
 
-mlx-manager enforces a strict single-model contract: exactly one model in memory at any moment, automatically freed after a configurable idle period.
+# or pick only what you need:
+pip install mlx-serve[text,vision]
+pip install mlx-serve[embeddings,tts,stt]
+```
 
----
-
-## Features
-
-- **Hot-swap by model name** — send a request to any configured model; the manager loads it and unloads the previous one automatically
-- **OpenAI-compatible API** — drop-in with LiteLLM, any OpenAI SDK, or direct HTTP
-- **All five MLX model types** — text (`mlx-lm`), vision (`mlx-vlm`), embeddings (`mlx-embeddings`), TTS (`mlx-audio`), STT (`mlx-whisper`)
-- **Subprocess isolation for large models** — text/vision models run as isolated subprocesses to prevent memory fragmentation; embeddings/TTS/STT run in-process
-- **Auto-unload on inactivity** — configurable timeout (default 10 min) frees memory when idle; `unload_at` timestamp surfaced in `/status`
-- **Per-request `keep_alive`** — override the idle timeout per request (`"keep_alive": "30m"`, `"-1"` for permanent, `0` to unload after response)
-- **Prompt caching / KV cache control** — `max_kv_cache_size` per model caps KV cache token capacity (`--max-kv-cache-size`); enables efficient prefix reuse across requests
-- **Model management API** — preload (`POST /v1/models/load`), force-unload (`POST /v1/models/unload`), delete from disk (`DELETE /v1/models/{id}`), show detail (`GET /v1/models/{id}`)
-- **Model capabilities** — each model exposes a `capabilities` array (`["completion"]`, `["embedding"]`, etc.) for LiteLLM routing
-- **Memory stats in `/status`** — unified memory pressure (`used_gb`, `available_gb`, `percent_used`) via psutil
-- **Failure recovery** — if a model fails to load, the next request retries automatically
-- **Subprocess logs** — stderr from failing models written to `/tmp/mlx-manager-logs/<model>.log`; retrievable via `GET /v1/status/logs/{model}`
-- **Optional bearer token auth** — set `MLX_API_KEY` env var to protect all `/v1/*` endpoints
-- **YAML model registry** — add models by editing `models.yaml`, no code changes needed
-- **Minimal footprint** — ~600 lines of Python, no GUI, runs as a headless daemon
-
----
-
-## Why Not Ollama?
-
-Ollama is the closest equivalent in terms of feature set and design philosophy — hot-swap, auto-unload, OpenAI-compatible API, single active model. The difference is the runtime.
-
-Ollama uses **llama.cpp** as its inference backend. llama.cpp uses Metal but is not the native Apple MLX framework. MLX is Apple's own machine learning framework, built specifically for the unified memory architecture of Apple Silicon. In practice, MLX models from `mlx-community` typically outperform their llama.cpp equivalents on Apple Silicon in both throughput and memory efficiency.
-
-mlx-manager is what Ollama would be if it were built natively on MLX.
-
----
-
-## Why Not LM Studio?
-
-LM Studio is closed source and requires a GUI app to be installed and running. It cannot be embedded in a headless pipeline, scripted, or modified. Its MLX support is also newer and less complete than running mlx-lm/mlx-vlm directly.
-
----
-
-## Why Not mlx-openai-server?
-
-`mlx-openai-server` is a good project. The key architectural difference: it runs all models in-process. For a 0.6B embedding model that's fine. For a 7B+ LLM it causes memory fragmentation over long sessions — the Python process holds onto MLX memory allocations that are never fully released between model switches.
-
-mlx-manager runs text/vision models as **isolated subprocesses**. When a model is unloaded, the subprocess exits and the OS reclaims all its memory cleanly. Embeddings and TTS stay in-process because they are small enough that fragmentation is not a concern.
-
----
-
-## Why Not Docker?
-
-MLX requires direct access to the Apple Silicon Metal GPU. Docker on Mac runs a Linux VM — Metal is not accessible inside it. Running mlx-manager in Docker would silently fall back to CPU inference.
-
-The correct topology is: stateless services (LiteLLM, databases, monitoring) in Docker; mlx-manager on the Mac host. They communicate via `host.docker.internal`.
-
----
-
-## Prerequisites
-
-- Apple Silicon Mac (M1 or later)
-- macOS 13+
-- Python 3.11+
-- [uv](https://docs.astral.sh/uv/) — `curl -LsSf https://astral.sh/uv/install.sh | sh`
-- MLX models downloaded to your HuggingFace cache
+> **Requires:** Apple Silicon Mac (M1+), macOS 13+, Python 3.11+
 
 ---
 
 ## Quick Start
 
 ```bash
-# 1. Install dependencies
-make install
+# 1. Generate a default config
+mlx-serve init
 
-# 2. Download models you want to use
-#    Text/vision models — example:
-uv run huggingface-cli download mlx-community/Qwen2.5-7B-Instruct-4bit
+# 2. Edit models.yaml to list your models (see docs/configuration.md)
 
-#    TTS model:
-make download-tts
+# 3. Start the server
+mlx-serve start
 
-# 3. Edit models.yaml to list your downloaded models
-#    (see docs/configuration.md for the full reference)
-
-# 4. Start the manager
-make mlx-start
-
-# 5. Verify
-make status
-make models
+# 4. Verify
+curl http://localhost:8095/v1/models
 ```
 
-The manager listens on `http://0.0.0.0:8095`.
+---
+
+## Why mlx-serve?
+
+| | mlx-serve | Ollama | LM Studio | mlx-openai-server |
+|---|---|---|---|---|
+| **Runtime** | MLX (native Apple) | llama.cpp (Metal) | Mixed | MLX |
+| **Memory model** | One model, subprocess-isolated | One model, in-process | GUI-managed | In-process |
+| **Auto-unload** | Configurable timeout | Yes | Manual | No |
+| **Model types** | 5 (text, vision, embed, TTS, STT) | 1 (text) | ~2 | ~3 |
+| **API** | OpenAI-compatible | OpenAI-compatible | OpenAI-compatible | OpenAI-compatible |
+| **Headless / scriptable** | Yes | Yes | No (GUI) | Yes |
+| **Open source** | MIT | MIT | No | MIT |
+
+**Key differences:**
+
+- **vs Ollama** — Ollama uses llama.cpp. mlx-serve uses Apple's native MLX framework, which typically achieves better throughput and memory efficiency on Apple Silicon. mlx-serve is what Ollama would be if it were built natively on MLX.
+- **vs LM Studio** — Closed source, requires a GUI, cannot be embedded in headless pipelines.
+- **vs mlx-openai-server** — Runs all models in-process, causing memory fragmentation over long sessions. mlx-serve isolates text/vision models as subprocesses so the OS reclaims all memory cleanly on unload.
+- **vs Docker** — MLX requires direct Metal GPU access. Docker on Mac runs a Linux VM without Metal. The correct topology: stateless services in Docker, mlx-serve on the Mac host via `host.docker.internal`.
+
+---
+
+## Features
+
+- **Hot-swap by model name** — send a request to any configured model; the server loads it and unloads the previous one automatically
+- **OpenAI-compatible API** — drop-in with LiteLLM, any OpenAI SDK, or direct HTTP
+- **All five MLX model types** — text (`mlx-lm`), vision (`mlx-vlm`), embeddings (`mlx-embeddings`), TTS (`mlx-audio`), STT (`mlx-whisper`)
+- **Subprocess isolation** — text/vision models run as isolated subprocesses; embeddings/TTS/STT run in-process
+- **Auto-unload on inactivity** — configurable timeout (default 10 min) frees memory when idle
+- **Per-request `keep_alive`** — override the idle timeout per request (`"keep_alive": "30m"`, `"-1"` for permanent, `0` to unload immediately)
+- **Prompt caching** — `max_kv_cache_size` per model caps KV cache token capacity for efficient prefix reuse
+- **Model management API** — preload, force-unload, delete from disk, show detail, pull from HuggingFace
+- **Observability** — request metrics (TTFT, TPS, latency), memory monitoring, lifecycle event log, dashboard endpoint
+- **Optional auth** — set `MLX_API_KEY` to protect all `/v1/*` endpoints
+- **YAML config** — add models by editing `models.yaml`, no code changes needed
+- **CLI** — `mlx-serve init`, `start`, `stop`, `status`, `logs`
+
+---
+
+## Supported Model Types
+
+| Type | Backend | Endpoint | Capabilities |
+|------|---------|----------|--------------|
+| `text` | `mlx_lm.server` subprocess | `/v1/chat/completions` | `["completion"]` |
+| `vision` | `mlx_vlm.server` subprocess | `/v1/chat/completions` | `["completion", "vision"]` |
+| `embedding` | `mlx-embeddings` in-process | `/v1/embeddings` | `["embedding"]` |
+| `tts` | `mlx-audio` in-process | `/v1/audio/speech` | `["audio_speech"]` |
+| `stt` | `mlx-whisper` in-process | `/v1/audio/transcriptions` | `["audio_transcription"]` |
 
 ---
 
@@ -121,6 +105,18 @@ curl http://localhost:8095/v1/chat/completions \
   -d '{
     "model": "mlx-qwen2.5-7b",
     "messages": [{"role": "user", "content": "What is Apple Silicon?"}]
+  }'
+```
+
+### Streaming
+
+```bash
+curl http://localhost:8095/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "mlx-qwen2.5-7b",
+    "messages": [{"role": "user", "content": "Count to 5"}],
+    "stream": true
   }'
 ```
 
@@ -149,23 +145,11 @@ curl http://localhost:8095/v1/audio/transcriptions \
   -F "model=mlx-whisper-turbo"
 ```
 
-### Streaming
-
-```bash
-curl http://localhost:8095/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "mlx-qwen2.5-7b",
-    "messages": [{"role": "user", "content": "Count to 5"}],
-    "stream": true
-  }'
-```
-
 ---
 
 ## LiteLLM Integration
 
-mlx-manager is designed to sit behind LiteLLM in a Docker-on-Mac stack.
+mlx-serve is designed to sit behind LiteLLM in a Docker-on-Mac stack.
 
 ```yaml
 # litellm/config.yaml
@@ -185,27 +169,18 @@ model_list:
 
 ---
 
-## Make Commands
-
-| Command | Description |
-|---------|-------------|
-| `make install` | Install dependencies |
-| `make mlx-start` | Start manager on port 8095 (foreground) |
-| `make mlx-dev` | Start with auto-reload on code changes |
-| `make mlx-stop` | Kill manager and any active subprocess |
-| `make status` | Print current model state as JSON |
-| `make models` | List all configured models as JSON |
-| `make download-tts` | Download the Chatterbox TTS model |
-| `make download-stt` | Download the Whisper STT model |
-
-## Authentication
-
-Set `MLX_API_KEY` in the environment to enable bearer token auth on all `/v1/*` endpoints. When unset, all requests are accepted (safe for localhost-only use).
+## Development
 
 ```bash
-export MLX_API_KEY=my-secret-key
-make mlx-start
+git clone https://github.com/raspoli/mlx-serve.git
+cd mlx-serve
+make install    # uv sync with all extras
+make dev        # start with auto-reload
+make test       # run test suite
+make lint       # ruff check + format check
 ```
+
+See [docs/development.md](docs/development.md) for the full guide.
 
 ---
 
@@ -213,37 +188,13 @@ make mlx-start
 
 | Document | Contents |
 |----------|----------|
-| [docs/architecture.md](docs/architecture.md) | System design, module map, state machines, request flows, design decisions |
-| [docs/configuration.md](docs/configuration.md) | `models.yaml` complete reference, all settings, validation rules |
-| [docs/api.md](docs/api.md) | All endpoints, request/response schemas, curl examples, error codes |
-| [docs/development.md](docs/development.md) | Setup, make commands, debugging, adding models, LiteLLM integration |
+| [docs/architecture.md](docs/architecture.md) | System design, module map, state machines, request flows |
+| [docs/configuration.md](docs/configuration.md) | `models.yaml` complete reference, all settings |
+| [docs/api.md](docs/api.md) | All endpoints, request/response schemas, curl examples |
+| [docs/development.md](docs/development.md) | Setup, debugging, adding models, contributing |
 
 ---
 
-## Project Structure
+## License
 
-```
-mlx-manager/
-├── src/
-│   ├── main.py              FastAPI app and lifespan
-│   ├── config.py            Reads models.yaml, typed config
-│   ├── router.py            HTTP endpoints, cross-manager coordination
-│   ├── process_manager.py   Subprocess lifecycle (text/vision)
-│   └── inline_manager.py    In-process lifecycle (embedding/tts)
-├── models.yaml              Model registry — edit this to add models
-├── docs/                    Full documentation
-├── pyproject.toml
-└── Makefile
-```
-
----
-
-## Supported Model Types
-
-| Type | Inference | Endpoint | Capabilities |
-|------|-----------|----------|--------------|
-| `text` | `mlx_lm.server` subprocess | `/v1/chat/completions` | `["completion"]` |
-| `vision` | `mlx_vlm.server` subprocess | `/v1/chat/completions` | `["completion", "vision"]` |
-| `embedding` | `mlx-embeddings` in-process | `/v1/embeddings` | `["embedding"]` |
-| `tts` | `mlx-audio` in-process | `/v1/audio/speech` | `["audio_speech"]` |
-| `stt` | `mlx-whisper` in-process | `/v1/audio/transcriptions` | `["audio_transcription"]` |
+[MIT](LICENSE)

@@ -8,6 +8,7 @@ Usage:
     mlx-serve pull <model> [--port PORT]
     mlx-serve init [--dir DIR] [--force]
 """
+
 import argparse
 import json
 import shutil
@@ -121,7 +122,9 @@ def main() -> None:
     # start
     p_start = sub.add_parser("start", help="Start the server")
     p_start.add_argument("--host", default="0.0.0.0", help="Bind address (default: 0.0.0.0)")
-    p_start.add_argument("--port", type=int, default=None, help="Port (default: from models.yaml or 8095)")
+    p_start.add_argument(
+        "--port", type=int, default=None, help="Port (default: from models.yaml or 8095)"
+    )
 
     # status
     p_status = sub.add_parser("status", help="Show server and model status")
@@ -133,7 +136,9 @@ def main() -> None:
 
     # pull
     p_pull = sub.add_parser("pull", help="Download a model from HuggingFace")
-    p_pull.add_argument("model", help="HuggingFace model path (e.g. mlx-community/Qwen2.5-7B-Instruct-4bit)")
+    p_pull.add_argument(
+        "model", help="HuggingFace model path (e.g. mlx-community/Qwen2.5-7B-Instruct-4bit)"
+    )
     p_pull.add_argument("--port", type=int, default=None, help="Server port (default: 8095)")
 
     # init

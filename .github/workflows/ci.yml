@@ -7,31 +7,60 @@ on:
     branches: [main]
 
 jobs:
-  lint:
-    name: Syntax & import check
-    # MLX requires Apple Silicon — full inference tests must be run manually.
-    # This job validates Python syntax and that all src modules are importable
-    # without the MLX runtime (guarded imports in inline_manager are lazy).
-    runs-on: ubuntu-latest
+  test:
+    # MLX requires Apple Silicon — run on macOS ARM64 runners
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
     steps:
       - uses: actions/checkout@v4
 
-      - uses: astral-sh/setup-uv@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
         with:
-          version: "latest"
+          enable-cache: true
 
-      - name: Install non-MLX dependencies only
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --locked --extra dev --extra all
+
+      - name: Lint
+        run: uv run ruff check src/
+
+      - name: Format check
+        run: uv run ruff format --check src/ tests/
+
+      - name: Test
+        run: uv run pytest tests/ -v
+
+      - name: Minimize uv cache
+        run: uv cache prune --ci
+
+  build:
+    runs-on: macos-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Build package
+        run: uv build
+
+      - name: Verify wheel contents
         run: |
-          uv pip install --system \
-            fastapi \
-            uvicorn \
-            httpx \
-            pyyaml \
-            psutil \
-            huggingface-hub
-
-      - name: Compile-check all source files
-        run: python -m py_compile src/config.py src/process_manager.py src/inline_manager.py src/router.py src/main.py
-
-      - name: Verify models.yaml is valid YAML
-        run: python -c "import yaml; yaml.safe_load(open('models.yaml'))"
+          ls -la dist/
+          uv run python -c "
+          import zipfile, pathlib
+          whl = list(pathlib.Path('dist').glob('*.whl'))[0]
+          print(f'Wheel: {whl.name}')
+          for f in sorted(zipfile.ZipFile(whl).namelist()):
+              print(f'  {f}')
+          "

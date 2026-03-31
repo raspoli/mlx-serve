@@ -4,6 +4,7 @@ logging_config.py — configure structured logging with console + file output.
 Console gets human-readable logs; file gets the same for post-mortem debugging.
 Log files rotate automatically to avoid filling the disk.
 """
+
 import logging
 import logging.handlers
 from pathlib import Path

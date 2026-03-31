@@ -5,6 +5,7 @@ Unlike text/vision models (which spawn a subprocess), these model types are
 loaded directly into the FastAPI process via mlx-embeddings, mlx-audio, and
 mlx-whisper respectively.
 """
+
 import asyncio
 import gc
 import io
@@ -13,7 +14,7 @@ import pathlib
 import tempfile
 import time
 import wave
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any
 
@@ -43,21 +44,34 @@ _inactivity_timeout: int = config.INACTIVITY_TIMEOUT  # overridable per-request
 # ---------------------------------------------------------------------------
 
 
+_INSTALL_HINTS = {
+    "embedding": "pip install mlx-serve[embeddings]",
+    "tts": "pip install mlx-serve[tts]",
+    "stt": "pip install mlx-serve[stt]",
+}
+
+
 def _load_embedding(hf_path: str) -> tuple[Any, Any]:
-    from mlx_embeddings import load
+    try:
+        from mlx_embeddings import load
+    except ImportError:
+        raise RuntimeError(f"mlx-embeddings is not installed. Run: {_INSTALL_HINTS['embedding']}")
     return load(hf_path)  # returns (model, processor)
 
 
 def _load_tts(hf_path: str) -> tuple[Any, None]:
-    from mlx_audio.tts.utils import load_model
+    try:
+        from mlx_audio.tts.utils import load_model
+    except ImportError:
+        raise RuntimeError(f"mlx-audio is not installed. Run: {_INSTALL_HINTS['tts']}")
     return load_model(hf_path), None
 
 
 def _load_stt(hf_path: str) -> tuple[str, None]:
-    # mlx_whisper loads the model internally on each transcribe() call.
-    # We store the hf_path as the model reference so ensure_model() tracks
-    # state correctly and provides mutual exclusion with other model types.
-    import mlx_whisper  # validate the package is installed
+    try:
+        import mlx_whisper  # noqa: F401
+    except ImportError:
+        raise RuntimeError(f"mlx-whisper is not installed. Run: {_INSTALL_HINTS['stt']}")
     return hf_path, None
 
 
@@ -123,12 +137,12 @@ async def ensure_model(model_name: str) -> tuple[Any, Any]:
     global _state, _active_model, _model, _processor, _last_request_at
 
     if _active_model == model_name and _state == InlineModelState.READY:
-        _last_request_at = datetime.now(timezone.utc)
+        _last_request_at = datetime.now(UTC)
         return _model, _processor
 
     async with _load_lock:
         if _active_model == model_name and _state == InlineModelState.READY:
-            _last_request_at = datetime.now(timezone.utc)
+            _last_request_at = datetime.now(UTC)
             return _model, _processor
 
         prev_model = _active_model
@@ -165,13 +179,9 @@ async def ensure_model(model_name: str) -> tuple[Any, Any]:
                     None, _load_embedding, model_cfg.hf_path
                 )
             elif model_cfg.type == "tts":
-                _model, _processor = await loop.run_in_executor(
-                    None, _load_tts, model_cfg.hf_path
-                )
+                _model, _processor = await loop.run_in_executor(None, _load_tts, model_cfg.hf_path)
             elif model_cfg.type == "stt":
-                _model, _processor = await loop.run_in_executor(
-                    None, _load_stt, model_cfg.hf_path
-                )
+                _model, _processor = await loop.run_in_executor(None, _load_stt, model_cfg.hf_path)
             _state = InlineModelState.READY
         except Exception as exc:
             _state = InlineModelState.FAILED
@@ -183,7 +193,9 @@ async def ensure_model(model_name: str) -> tuple[Any, Any]:
             exc_str = str(exc).lower()
             if any(kw in exc_str for kw in ("memoryerror", "out of memory", "malloc")):
                 reason = "oom"
-                events.emit(events.EventType.OOM_DETECTED, model=model_name, detail={"error": str(exc)})
+                events.emit(
+                    events.EventType.OOM_DETECTED, model=model_name, detail={"error": str(exc)}
+                )
             events.emit(
                 events.EventType.MODEL_FAILED,
                 model=model_name,
@@ -217,7 +229,7 @@ async def ensure_model(model_name: str) -> tuple[Any, Any]:
             f"RAM={snap.ram_used_gb}GB | Metal={snap.metal_active_mb}MB"
         )
 
-        _last_request_at = datetime.now(timezone.utc)
+        _last_request_at = datetime.now(UTC)
         return _model, _processor
 
 
@@ -257,9 +269,7 @@ def set_keep_alive(seconds: int) -> None:
     _inactivity_timeout = seconds
 
 
-async def generate_embeddings(
-    model_name: str, inputs: list[dict]
-) -> list[list[float]]:
+async def generate_embeddings(model_name: str, inputs: list[dict]) -> list[list[float]]:
     """
     inputs: list of dicts with "text" and/or "image" keys.
     Text-only example:  [{"text": "hello"}, {"text": "world"}]
@@ -278,9 +288,7 @@ async def generate_tts(
     return await loop.run_in_executor(None, _run_tts, model, text, speed, lang_code)
 
 
-async def generate_stt(
-    model_name: str, audio_bytes: bytes, language: str | None = None
-) -> str:
+async def generate_stt(model_name: str, audio_bytes: bytes, language: str | None = None) -> str:
     """Transcribe audio bytes to text using an STT model."""
     hf_path, _ = await ensure_model(model_name)
     loop = asyncio.get_running_loop()
@@ -294,10 +302,9 @@ async def start_inactivity_watcher() -> None:
         if (
             _state == InlineModelState.READY
             and _last_request_at is not None
-            and datetime.now(timezone.utc) - _last_request_at
-            > timedelta(seconds=_inactivity_timeout)
+            and datetime.now(UTC) - _last_request_at > timedelta(seconds=_inactivity_timeout)
         ):
-            idle_secs = int((datetime.now(timezone.utc) - _last_request_at).total_seconds())
+            idle_secs = int((datetime.now(UTC) - _last_request_at).total_seconds())
             events.emit(
                 events.EventType.MODEL_INACTIVITY_UNLOAD,
                 model=_active_model,
@@ -309,7 +316,11 @@ async def start_inactivity_watcher() -> None:
 
 def get_status() -> dict:
     unload_at = None
-    if _last_request_at is not None and _inactivity_timeout > 0 and _state == InlineModelState.READY:
+    if (
+        _last_request_at is not None
+        and _inactivity_timeout > 0
+        and _state == InlineModelState.READY
+    ):
         unload_at = (_last_request_at + timedelta(seconds=_inactivity_timeout)).isoformat()
     return {
         "active_model": _active_model,

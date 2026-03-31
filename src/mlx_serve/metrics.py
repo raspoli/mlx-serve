@@ -5,12 +5,13 @@ Stores recent request metrics (TTFT, TPS, duration) and periodic memory
 snapshots in bounded deques.  Also writes to JSONL files for history
 that survives restarts.
 """
+
+import contextlib
 import json
 import logging
-import time
 from collections import deque
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -30,16 +31,16 @@ class RequestMetrics:
     request_id: str
     model: str
     endpoint: str
-    timestamp: str                      # ISO wall-clock
-    started_at: float                   # monotonic (internal only)
+    timestamp: str  # ISO wall-clock
+    started_at: float  # monotonic (internal only)
     total_duration_ms: float = 0.0
-    ttft_ms: float | None = None       # time to first token (streaming)
+    ttft_ms: float | None = None  # time to first token (streaming)
     tokens_per_second: float | None = None
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     status_code: int = 200
     error: str | None = None
-    cold_start: bool = False            # model was loaded on demand
+    cold_start: bool = False  # model was loaded on demand
 
 
 @dataclass
@@ -62,7 +63,7 @@ class MemorySnapshot:
     subprocess_pid: int | None = None
     # Context
     active_model: str | None = None
-    event: str = "sample"               # "sample", "model_loaded", "model_unloaded"
+    event: str = "sample"  # "sample", "model_loaded", "model_unloaded"
 
 
 # ---------------------------------------------------------------------------
@@ -127,23 +128,26 @@ def record_request(m: RequestMetrics) -> None:
         try:
             record = asdict(m)
             record.pop("started_at", None)  # internal monotonic, not useful on disk
-            with open(_requests_file, "a", encoding="utf-8") as f:
+            with _requests_file.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(record, default=str) + "\n")
         except OSError:
             pass
 
 
 def _update_aggregates(m: RequestMetrics) -> None:
-    agg = _aggregates.setdefault(m.model, {
-        "total_requests": 0,
-        "total_errors": 0,
-        "total_duration_ms": 0.0,
-        "total_prompt_tokens": 0,
-        "total_completion_tokens": 0,
-        "ttft_values": [],
-        "tps_values": [],
-        "cold_starts": 0,
-    })
+    agg = _aggregates.setdefault(
+        m.model,
+        {
+            "total_requests": 0,
+            "total_errors": 0,
+            "total_duration_ms": 0.0,
+            "total_prompt_tokens": 0,
+            "total_completion_tokens": 0,
+            "ttft_values": [],
+            "tps_values": [],
+            "cold_starts": 0,
+        },
+    )
     agg["total_requests"] += 1
     agg["total_duration_ms"] += m.total_duration_ms
     if m.error:
@@ -183,13 +187,11 @@ def take_memory_snapshot(
 
     sub_rss = None
     if subprocess_pid is not None:
-        try:
+        with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
             sub_rss = round(psutil.Process(subprocess_pid).memory_info().rss / 1_048_576, 1)
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            pass
 
     snap = MemorySnapshot(
-        timestamp=datetime.now(timezone.utc).isoformat(),
+        timestamp=datetime.now(UTC).isoformat(),
         ram_total_gb=round(vm.total / 1e9, 1),
         ram_used_gb=round(vm.used / 1e9, 1),
         ram_available_gb=round(vm.available / 1e9, 1),
@@ -209,7 +211,7 @@ def take_memory_snapshot(
     # Write to JSONL (at reduced frequency — caller controls this)
     if _memory_file is not None and event != "sample":
         try:
-            with open(_memory_file, "a", encoding="utf-8") as f:
+            with _memory_file.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(asdict(snap), default=str) + "\n")
         except OSError:
             pass
@@ -221,6 +223,7 @@ def get_metal_memory() -> dict[str, float | None]:
     """Read Metal GPU memory from mlx.core.metal. Returns empty values if unavailable."""
     try:
         import mlx.core as mx
+
         return {
             "active_mb": round(mx.metal.get_active_memory() / 1_048_576, 1),
             "peak_mb": round(mx.metal.get_peak_memory() / 1_048_576, 1),
@@ -264,6 +267,7 @@ async def start_memory_sampler(
 ) -> None:
     """Background task: sample memory every `interval` seconds."""
     import asyncio
+
     global _last_pressure, _last_swap_warned, _disk_write_counter
 
     while True:
@@ -273,7 +277,9 @@ async def start_memory_sampler(
             pid = get_subprocess_pid() if get_subprocess_pid else None
 
             snap = take_memory_snapshot(
-                active_model=model, event="sample", subprocess_pid=pid,
+                active_model=model,
+                event="sample",
+                subprocess_pid=pid,
             )
 
             # Write to disk every 60s
@@ -281,7 +287,7 @@ async def start_memory_sampler(
             if _disk_write_counter >= 6 and _memory_file is not None:
                 _disk_write_counter = 0
                 try:
-                    with open(_memory_file, "a", encoding="utf-8") as f:
+                    with _memory_file.open("a", encoding="utf-8") as f:
                         f.write(json.dumps(asdict(snap), default=str) + "\n")
                 except OSError:
                     pass

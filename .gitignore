@@ -15,9 +15,11 @@ build/
 .idea/
 .vscode/
 
-# Logs (runtime artifacts — not source)
+# Logs and monitoring artifacts
 *.log
+*.jsonl
 /tmp/mlx-manager-logs/
+.mlx-serve/
 
 # Secrets
 .env

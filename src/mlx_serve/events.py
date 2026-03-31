@@ -6,12 +6,13 @@ Every model lifecycle transition is recorded as a ModelEvent and:
   2. Appended to a JSONL file on disk (survives restarts)
   3. Logged to Python logging (appears in terminal)
 """
+
 import json
 import logging
 from collections import deque
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +23,7 @@ logger = logging.getLogger("mlx-serve.events")
 # ---------------------------------------------------------------------------
 
 
-class EventType(str, Enum):
+class EventType(StrEnum):
     # Server
     SERVER_START = "server.start"
     SERVER_SHUTDOWN = "server.shutdown"
@@ -102,7 +103,7 @@ def emit(
 ) -> ModelEvent:
     """Record a lifecycle event."""
     ev = ModelEvent(
-        timestamp=datetime.now(timezone.utc).isoformat(),
+        timestamp=datetime.now(UTC).isoformat(),
         event=event_type.value,
         model=model,
         detail=detail or {},
@@ -127,7 +128,7 @@ def emit(
     # Append to JSONL file
     if _log_file is not None:
         try:
-            with open(_log_file, "a", encoding="utf-8") as f:
+            with _log_file.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(asdict(ev), default=str) + "\n")
         except OSError:
             pass  # don't crash the server over a log write

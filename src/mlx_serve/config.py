@@ -7,6 +7,7 @@ Config discovery order:
   3. ~/.mlx-serve/models.yaml  (user config directory)
   4. Bundled _default_models.yaml inside the package
 """
+
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -53,10 +54,12 @@ _CONFIG_PATH = _find_config()
 @dataclass
 class ModelConfig:
     name: str
-    type: str                    # "text", "vision", "embedding", "tts", or "stt"
+    type: str  # "text", "vision", "embedding", "tts", or "stt"
     hf_path: str
-    context_length: int = 0      # max output tokens per response (--max-tokens); 0 = server default
-    max_kv_cache_size: int = 0   # KV cache token capacity for prompt caching (--max-kv-cache-size); 0 = model default
+    context_length: int = 0  # max output tokens per response (--max-tokens); 0 = server default
+    max_kv_cache_size: int = (
+        0  # KV cache token capacity for prompt caching (--max-kv-cache-size); 0 = model default
+    )
 
 
 @dataclass
@@ -64,16 +67,16 @@ class MonitoringConfig:
     log_dir: Path
     metrics_history_size: int = 500
     events_history_size: int = 1000
-    memory_sample_interval: int = 10     # seconds, in-memory
-    memory_log_interval: int = 60        # seconds, to disk
-    log_retention_mb: int = 50           # per JSONL file
+    memory_sample_interval: int = 10  # seconds, in-memory
+    memory_log_interval: int = 60  # seconds, to disk
+    log_retention_mb: int = 50  # per JSONL file
 
 
 _VALID_TYPES = {"text", "vision", "embedding", "tts", "stt"}
 
 
 def _load() -> tuple[dict[str, ModelConfig], int, int, int, int, MonitoringConfig]:
-    with open(_CONFIG_PATH) as f:
+    with _CONFIG_PATH.open() as f:
         data = yaml.safe_load(f)
 
     models = {}
