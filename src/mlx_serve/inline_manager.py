@@ -335,9 +335,7 @@ async def generate_stt(model_name: str, audio_bytes: bytes, language: str | None
     return await loop.run_in_executor(None, _run_stt, hf_path, audio_bytes, language)
 
 
-async def generate_decision(
-    model_name: str, state: str | dict | list, questions: dict
-) -> dict:
+async def generate_decision(model_name: str, state: str | dict | list, questions: dict) -> dict:
     """Run a Laya decision model predict and return the full result."""
     agent, _ = await ensure_model(model_name)
     loop = asyncio.get_running_loop()

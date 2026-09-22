@@ -905,7 +905,9 @@ async def decisions(request: Request) -> dict:
     if not questions or not isinstance(questions, dict):
         raise HTTPException(
             status_code=400,
-            detail={"error": {"message": "'questions' field must be a non-empty dict", "code": 400}},
+            detail={
+                "error": {"message": "'questions' field must be a non-empty dict", "code": 400}
+            },
         )
 
     keep_alive = _parse_keep_alive(body.get("keep_alive"))

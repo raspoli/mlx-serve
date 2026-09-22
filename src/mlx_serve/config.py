@@ -60,7 +60,9 @@ class ModelConfig:
     max_kv_cache_size: int = (
         0  # KV cache token capacity for prompt caching (--max-kv-cache-size); 0 = model default
     )
-    extra_body: dict = field(default_factory=dict)  # default request-body params merged into forwarded chat/completions requests (client values win)
+    extra_body: dict = field(
+        default_factory=dict
+    )  # default request-body params merged into forwarded chat/completions requests (client values win)
 
 
 @dataclass
