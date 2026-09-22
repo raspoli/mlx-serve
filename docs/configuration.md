@@ -58,6 +58,7 @@ Controls how the model is loaded and which inference path is used.
 | `embedding` | in-process — `mlx-embeddings` | `/v1/embeddings` |
 | `tts` | in-process — `mlx-audio` | `/v1/audio/speech` |
 | `stt` | in-process — `mlx-whisper` | `/v1/audio/transcriptions` |
+| `decision` | in-process — `laya_mlx` | `/v1/decisions` |
 
 Invalid types are rejected at startup with a clear error message.
 
@@ -134,6 +135,29 @@ Download before first use:
 ```bash
 make download-stt
 ```
+### Decision model
+
+Loaded in-process via `laya_mlx`. Accepts a `state` + typed `questions` (choice, score, noul) and returns probabilities and the selected answer — no token-by-token decoding.
+
+```yaml
+- name: laya-en
+  type: decision
+  hf_path: aac6fef/laya-mlx
+```
+
+Multilingual variant (100+ languages, incl. Persian, Arabic, French):
+
+```yaml
+- name: laya-multilingual
+  type: decision
+  hf_path: aac6fef/laya-multilingual-mlx
+```
+
+Install before first use:
+```bash
+pip install mlx-serve[decision]
+```
+
 
 ### `context_length` (optional)
 
@@ -146,7 +170,7 @@ Maximum output tokens per response, passed to the subprocess as `--max-tokens`. 
   context_length: 32768    # allow responses up to 32768 tokens
 ```
 
-Only applies to `text` and `vision` model types. Ignored for `embedding`, `tts`, and `stt`.
+Only applies to `text` and `vision` model types. Ignored for `embedding`, `tts`, `stt`, and `decision`.
 
 ### `max_kv_cache_size` (optional)
 

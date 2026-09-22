@@ -35,6 +35,7 @@ When `MLX_API_KEY` is unset (default), authentication is disabled — safe for l
 | `POST` | `/v1/embeddings` | Generate embeddings |
 | `POST` | `/v1/audio/speech` | Text-to-speech |
 | `POST` | `/v1/audio/transcriptions` | Speech-to-text |
+| `POST` | `/v1/decisions` | Typed decisions (Laya) |
 | `GET` | `/v1/status` | Manager state + memory stats |
 | `GET` | `/v1/status/logs/{model}` | Last 100 lines of a model's subprocess log |
 | `GET` | `/status` | Same as `/v1/status` (no prefix, operator convenience) |
@@ -60,7 +61,7 @@ Returns the manager version string.
 
 ```bash
 curl http://localhost:8095/v1/version
-# → {"version": "0.1.0"}
+# → {"version": "0.2.0"}
 ```
 
 ---
@@ -109,6 +110,7 @@ Returns all models defined in `models.yaml` with their capabilities.
 | `embedding` | Embeddings via `/v1/embeddings` |
 | `audio_speech` | TTS via `/v1/audio/speech` |
 | `audio_transcription` | STT via `/v1/audio/transcriptions` |
+| `decision` | Typed decisions via `/v1/decisions` |
 
 **Example**
 
@@ -444,6 +446,115 @@ curl http://localhost:8095/v1/audio/transcriptions \
 
 ---
 
+## POST /v1/decisions
+
+Run a typed decision model (Laya) — choice, score, or boolean (noul) questions against a state. No token-by-token decoding: the model processes bidirectionally and returns probabilities directly.
+
+**Request body**
+
+```json
+{
+  "model": "laya-en",
+  "state": "I was billed twice. Please refund the duplicate charge.",
+  "questions": {
+    "department": {
+      "type": "choice",
+      "instructions": "Which department should handle this?",
+      "criteria": ["billing", "technical", "sales"]
+    },
+    "urgent": {
+      "type": "noul",
+      "instructions": "Is this urgent?"
+    }
+  }
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `model` | string | yes | Must be a configured `decision` model (e.g. `laya-en`, `laya-multilingual`) |
+| `state` | string / dict / list | yes | The input context — plain text, a JSON object, or a conversation list |
+| `questions` | dict | yes | Named questions following Laya’s typed schema (see below) |
+| `keep_alive` | string | no | Override inactivity timeout (`"5m"`, `"-1"`, etc.) |
+
+**Question types**
+
+Each question key is a name you choose. The `type` field controls the output:
+
+| `type` | Purpose | `criteria` format | Returns |
+|--------|---------|-------------------|---------|
+| `choice` | Pick one from a list | Array of labels or dict of `{label: description}` | Selected label + probabilities over all options |
+| `score` | Ordinal score on a rubric | Array of level descriptions | Expected score (float) + probabilities per level |
+| `noul` | Boolean true/false | Omitted | P(true) as a float |
+
+**Response**
+
+```json
+{
+  "object": "decision",
+  "model": "laya-rl-agent",
+  "answers": {
+    "department": {
+      "type": "choice",
+      "confidence": 0.8138,
+      "action": {"act_probability": 1.0},
+      "choice": "billing",
+      "probabilities": {
+        "billing": 0.9572,
+        "technical": 0.0274,
+        "sales": 0.0154
+      }
+    },
+    "urgent": {
+      "type": "noul",
+      "confidence": 0.8101,
+      "action": {"act_probability": 1.0},
+      "noul": 0.8101
+    }
+  },
+  "usage": {
+    "input_tokens": 83,
+    "output_tokens": 0
+  }
+}
+```
+
+**Example**
+
+```bash
+curl http://localhost:8095/v1/decisions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "laya-en",
+    "state": "I was billed twice. Please refund.",
+    "questions": {
+      "department": {
+        "type": "choice",
+        "instructions": "Which department?",
+        "criteria": ["billing", "technical", "sales"]
+      }
+    }
+  }'
+```
+
+Multilingual input (Persian, Arabic, French, etc.):
+
+```bash
+curl http://localhost:8095/v1/decisions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "laya-multilingual",
+    "state": "\u0645\u0646 \u06cc\u06a9 \u062a\u0648\u0633\u0639\u0647\u200c\u062f\u0647\u0646\u062f\u0647 \u0647\u0633\u062a\u0645.",
+    "questions": {
+      "role": {
+        "type": "choice",
+        "instructions": "What is this person?",
+        "criteria": ["developer", "manager", "designer"]
+      }
+    }
+  }'
+```
+
 ## GET /v1/status
 
 Returns the current state of both model managers plus system memory stats. Useful for monitoring and debugging.
@@ -497,6 +608,7 @@ make status
 
 ---
 
+
 ## GET /v1/status/logs/{model_name}
 
 Returns the last 100 lines of the subprocess log for a text or vision model. Logs are written to `/tmp/mlx-manager-logs/<model>.log` and only exist after the model has been loaded at least once.
@@ -531,7 +643,7 @@ All errors follow the OpenAI error format.
 | `400` | Request body is not valid JSON |
 | `400` | `input` field is empty (TTS endpoint) |
 | `404` | Model name not found in `models.yaml` |
-| `404` | Model found but wrong type (e.g. using a `tts` model on `/chat/completions`) |
+| `404` | Model found but wrong type (e.g. using a `tts` model on `/chat/completions` or a non-decision model on `/decisions`) |
 | `503` | Model failed to load within `startup_timeout_seconds` |
 
 **Error body**

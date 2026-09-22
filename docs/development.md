@@ -68,7 +68,7 @@ uv run huggingface-cli download mlx-community/your-model-name
 
 ```yaml
 - name: my-new-model          # the name clients use in API requests
-  type: text                  # text | vision | embedding | tts
+  type: text                  # text | vision | embedding | tts | stt | decision
   hf_path: mlx-community/your-model-name
 ```
 
@@ -163,5 +163,6 @@ The `model` field in `litellm_params` must match the `name` in `models.yaml`.
 | `mlx-vlm` | Vision model inference subprocess |
 | `mlx-audio` | TTS inference (in-process) |
 | `mlx-embeddings` | Embedding inference (in-process) |
+| `laya-mlx` | Decision model inference (in-process) |
 
 All MLX packages require Apple Silicon and will not function on x86 hardware.

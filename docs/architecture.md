@@ -21,8 +21,8 @@ mlx-manager is a thin FastAPI proxy that sits between a client (typically LiteLL
 │  ┌────────────────────┐    ┌────────────────────────────┐   │
 │  │  process_manager   │    │  inline_manager            │   │
 │  │                    │    │                            │   │
-│  │  text / vision     │    │  embedding / tts / stt     │   │
-│  │  (subprocess)      │    │  (in-process, executor)    │   │
+│  │  text / vision     │    │  embedding / tts / stt / decision  │   │
+│  │  (subprocess)      │    │  (in-process, executor)           │   │
 │  └────────────────────┘    └────────────────────────────┘   │
 │          │                                                   │
 │          ▼  (port 8091, loopback only)                       │
@@ -64,7 +64,7 @@ This keeps both managers free of knowledge about each other.
 Subprocess lifecycle for `text` and `vision` model types. Spawns `mlx_lm.server` or `mlx_vlm.server` as a child process, polls its `/health` endpoint until ready, and kills it on unload or inactivity.
 
 ### `src/inline_manager.py`
-In-process lifecycle for `embedding`, `tts`, and `stt` model types. Loads models directly into the FastAPI process via `mlx-embeddings`, `mlx-audio`, and `mlx-whisper`. Runs blocking inference in a thread executor to avoid blocking the async event loop.
+In-process lifecycle for `embedding`, `tts`, `stt`, and `decision` model types. Loads models directly into the FastAPI process via `mlx-embeddings`, `mlx-audio`, `mlx-whisper`, and `laya_mlx`. Runs blocking inference in a thread executor to avoid blocking the async event loop.
 
 ---
 
@@ -77,6 +77,7 @@ In-process lifecycle for `embedding`, `tts`, and `stt` model types. Loads models
 | `embedding` | in-process (thread executor) | Small models; no subprocess overhead needed |
 | `tts` | in-process (thread executor) | Same as embedding |
 | `stt` | in-process (thread executor) | Same as embedding; mlx-whisper loads lazily per-call |
+| `decision` | in-process (thread executor) | Small models (322M–421M params); same lifecycle as embedding |
 
 ---
 

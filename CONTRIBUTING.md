@@ -33,7 +33,7 @@ src/mlx_serve/
 ├── config.py              YAML config loading, typed constants
 ├── router.py              OpenAI-compatible HTTP endpoints
 ├── process_manager.py     Subprocess lifecycle (text/vision models)
-├── inline_manager.py      In-process lifecycle (embedding/TTS/STT models)
+├── inline_manager.py      In-process lifecycle (embedding/TTS/STT/decision models)
 ├── events.py              Structured lifecycle event log
 ├── metrics.py             Request metrics and memory monitoring
 ├── logging_config.py      Logging setup
@@ -95,7 +95,7 @@ Style guidelines:
 If you want to add support for a new MLX inference library:
 
 1. Add the new type string to `_VALID_TYPES` in `config.py`
-2. Add load/run/generate functions to `inline_manager.py` (for in-process) or extend `process_manager.py` (for subprocess)
+2. Add load/run/generate functions to `inline_manager.py` (for in-process, e.g. embedding/tts/stt/decision) or extend `process_manager.py` (for subprocess, e.g. text/vision)
 3. Add a new endpoint in `router.py`
 4. Add the type to `_TYPE_CAPABILITIES` in `router.py`
 5. Add tests for the new endpoint in `tests/test_api.py`
@@ -105,7 +105,7 @@ If you want to add support for a new MLX inference library:
 
 ```yaml
 - name: my-model          # name clients use in API requests
-  type: text              # text | vision | embedding | tts | stt
+  type: text              # text | vision | embedding | tts | stt | decision
   hf_path: mlx-community/my-model-name
   context_length: 32768   # max output tokens (optional)
   max_kv_cache_size: 0    # KV cache token limit for prompt caching (optional)

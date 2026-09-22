@@ -6,7 +6,7 @@
 [![CI](https://github.com/raspoli/mlx-serve/actions/workflows/ci.yml/badge.svg)](https://github.com/raspoli/mlx-serve/actions/workflows/ci.yml)
 [![Platform](https://img.shields.io/badge/platform-Apple%20Silicon-black?logo=apple)](https://developer.apple.com/metal/)
 
-Local inference server for Apple Silicon that hot-swaps MLX models on demand — text, vision, embeddings, TTS, and STT — loading exactly one at a time to stay within unified memory limits.
+Local inference server for Apple Silicon that hot-swaps MLX models on demand — text, vision, embeddings, TTS, STT, and decision (Laya) — loading exactly one at a time to stay within unified memory limits.
 
 ```
 Client / LiteLLM  -->  mlx-serve (port 8095)  -->  MLX model (one at a time)
@@ -22,6 +22,7 @@ pip install mlx-serve[all]
 # or pick only what you need:
 pip install mlx-serve[text,vision]
 pip install mlx-serve[embeddings,tts,stt]
+pip install mlx-serve[decision]       # Laya typed decision models
 ```
 
 > **Requires:** Apple Silicon Mac (M1+), macOS 13+, Python 3.11+
@@ -52,7 +53,7 @@ curl http://localhost:8095/v1/models
 | **Runtime** | MLX (native Apple) | llama.cpp (Metal) | Mixed | MLX |
 | **Memory model** | One model, subprocess-isolated | One model, in-process | GUI-managed | In-process |
 | **Auto-unload** | Configurable timeout | Yes | Manual | No |
-| **Model types** | 5 (text, vision, embed, TTS, STT) | 1 (text) | ~2 | ~3 |
+| **Model types** | 6 (text, vision, embed, TTS, STT, decision) | 1 (text) | ~2 | ~3 |
 | **API** | OpenAI-compatible | OpenAI-compatible | OpenAI-compatible | OpenAI-compatible |
 | **Headless / scriptable** | Yes | Yes | No (GUI) | Yes |
 | **Open source** | MIT | MIT | No | MIT |
@@ -70,7 +71,7 @@ curl http://localhost:8095/v1/models
 
 - **Hot-swap by model name** — send a request to any configured model; the server loads it and unloads the previous one automatically
 - **OpenAI-compatible API** — drop-in with LiteLLM, any OpenAI SDK, or direct HTTP
-- **All five MLX model types** — text (`mlx-lm`), vision (`mlx-vlm`), embeddings (`mlx-embeddings`), TTS (`mlx-audio`), STT (`mlx-whisper`)
+- **All six MLX model types** — text (`mlx-lm`), vision (`mlx-vlm`), embeddings (`mlx-embeddings`), TTS (`mlx-audio`), STT (`mlx-whisper`), decision (`laya_mlx`)
 - **Subprocess isolation** — text/vision models run as isolated subprocesses; embeddings/TTS/STT run in-process
 - **Auto-unload on inactivity** — configurable timeout (default 10 min) frees memory when idle
 - **Per-request `keep_alive`** — override the idle timeout per request (`"keep_alive": "30m"`, `"-1"` for permanent, `0` to unload immediately)
@@ -92,6 +93,7 @@ curl http://localhost:8095/v1/models
 | `embedding` | `mlx-embeddings` in-process | `/v1/embeddings` | `["embedding"]` |
 | `tts` | `mlx-audio` in-process | `/v1/audio/speech` | `["audio_speech"]` |
 | `stt` | `mlx-whisper` in-process | `/v1/audio/transcriptions` | `["audio_transcription"]` |
+| `decision` | `laya_mlx` in-process | `/v1/decisions` | `["decision"]` |
 
 ---
 
@@ -144,6 +146,30 @@ curl http://localhost:8095/v1/audio/transcriptions \
   -F "file=@recording.wav" \
   -F "model=mlx-whisper-turbo"
 ```
+
+### Typed decisions (Laya)
+
+```bash
+curl http://localhost:8095/v1/decisions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "laya-en",
+    "state": "I was billed twice. Please refund the duplicate.",
+    "questions": {
+      "department": {
+        "type": "choice",
+        "instructions": "Which department should handle this?",
+        "criteria": ["billing", "technical", "sales"]
+      },
+      "urgent": {
+        "type": "noul",
+        "instructions": "Is this urgent?"
+      }
+    }
+  }'
+```
+
+Returns typed answers with probabilities — no token-by-token decoding, no streaming.
 
 ---
 

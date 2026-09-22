@@ -9,6 +9,7 @@
 #   "embedding"      -> in-process via mlx-embeddings
 #   "tts"            -> in-process via mlx-audio
 #   "stt"            -> in-process via mlx-whisper
+#   "decision"       -> in-process via laya_mlx (typed decisions: choice/score/noul)
 # context_length:    max output tokens per response (0 = server default)
 # max_kv_cache_size: KV cache token capacity (0 = no limit)
 
@@ -33,3 +34,11 @@ models: []
   # - name: mlx-whisper-turbo
   #   type: stt
   #   hf_path: mlx-community/whisper-large-v3-turbo
+  #
+  # - name: laya-en
+  #   type: decision
+  #   hf_path: aac6fef/laya-mlx
+  #
+  # - name: laya-multilingual
+  #   type: decision
+  #   hf_path: aac6fef/laya-multilingual-mlx
