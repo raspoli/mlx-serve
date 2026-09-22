@@ -259,7 +259,11 @@ async def ensure_model(model_name: str) -> tuple[Any, Any]:
 
 
 def _unload_unsafe() -> None:
-    """Zero out model state. Must only be called while holding _load_lock."""
+    """Zero out model state. Must only be called while holding _load_lock.
+
+    After clearing Python references, flushes MLX caches and streams so
+    Metal GPU memory is fully released before the next model loads.
+    """
     global _state, _active_model, _model, _processor, _inactivity_timeout
     prev_model = _active_model
     _model = None
@@ -268,6 +272,17 @@ def _unload_unsafe() -> None:
     _active_model = None
     _inactivity_timeout = config.INACTIVITY_TIMEOUT  # reset per-request override
     gc.collect()
+
+    # Flush MLX Metal caches so GPU memory is fully reclaimed before the
+    # next model loads. Without this, switching between in-process models
+    # that use MLX (e.g. Laya decision models) can hit broken-pipe errors.
+    try:
+        import mlx.core as mx
+
+        mx.clear_cache()
+        mx.clear_streams()
+    except Exception:
+        pass
 
     if prev_model is not None:
         snap = metrics.take_memory_snapshot(active_model=None, event="model_unloaded")
