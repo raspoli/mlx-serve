@@ -9,7 +9,7 @@ Config discovery order:
 """
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
@@ -60,6 +60,7 @@ class ModelConfig:
     max_kv_cache_size: int = (
         0  # KV cache token capacity for prompt caching (--max-kv-cache-size); 0 = model default
     )
+    extra_body: dict = field(default_factory=dict)  # default request-body params merged into forwarded chat/completions requests (client values win)
 
 
 @dataclass
@@ -72,7 +73,7 @@ class MonitoringConfig:
     log_retention_mb: int = 50  # per JSONL file
 
 
-_VALID_TYPES = {"text", "vision", "embedding", "tts", "stt"}
+_VALID_TYPES = {"text", "vision", "embedding", "tts", "stt", "decision"}
 
 
 def _load() -> tuple[dict[str, ModelConfig], int, int, int, int, MonitoringConfig]:
@@ -92,6 +93,7 @@ def _load() -> tuple[dict[str, ModelConfig], int, int, int, int, MonitoringConfi
             hf_path=entry["hf_path"],
             context_length=entry.get("context_length", 0),
             max_kv_cache_size=entry.get("max_kv_cache_size", 0),
+            extra_body=entry.get("extra_body", {}),
         )
 
     # Monitoring settings (optional section in models.yaml)

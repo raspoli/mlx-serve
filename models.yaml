@@ -14,6 +14,8 @@
 # max_kv_cache_size: KV cache token capacity for prompt caching (--max-kv-cache-size);
 #                    limits how many tokens of KV state are retained between requests;
 #                    0 = no limit (model default). Set to e.g. 8192 to cap memory usage.
+# extra_body:        default request-body params merged into each request (client values win);
+#                    e.g. chat_template_kwargs.enable_thinking to toggle Qwen reasoning.
 
 mlx_port: 8091                    # Internal port used by the active mlx subprocess
 manager_port: 8095                # Port the FastAPI manager listens on
@@ -45,11 +47,17 @@ models:
     type: text
     hf_path: mlx-community/Qwen3.5-4B-MLX-8bit
     context_length: 32768
+    extra_body:
+      chat_template_kwargs:
+        enable_thinking: false
 
   - name: mlx-qwen3.5-9b
     type: text
     hf_path: mlx-community/Qwen3.5-9B-8bit
     context_length: 32768
+    extra_body:
+      chat_template_kwargs:
+        enable_thinking: false
 
   # --- Embedding models (in-process, mlx-embeddings) ---
   - name: mlx-qwen3-embedding
@@ -76,3 +84,12 @@ models:
   - name: mlx-whisper-turbo
     type: stt
     hf_path: mlx-community/whisper-large-v3-turbo
+
+  # --- Decision models (in-process, laya_mlx) ---
+  - name: laya-en
+    type: decision
+    hf_path: aac6fef/laya-mlx
+
+  - name: laya-multilingual
+    type: decision
+    hf_path: aac6fef/laya-multilingual-mlx

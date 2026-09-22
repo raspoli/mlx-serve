@@ -1,6 +1,6 @@
 [project]
 name = "mlx-serve"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local inference server for Apple Silicon that hot-swaps MLX models (LLM, vision, embeddings, TTS, STT) via OpenAI-compatible API"
 readme = "README.md"
 license = "MIT"
@@ -49,12 +49,14 @@ vision = ["mlx-vlm>=0.0.9"]
 tts = ["mlx-audio>=0.4.0"]
 stt = ["mlx-whisper>=0.4.0"]
 embeddings = ["mlx-embeddings>=0.1.0"]
+decision = ["laya-mlx>=0.1.0"]
 all = [
     "mlx-lm>=0.14",
     "mlx-vlm>=0.0.9",
     "mlx-audio>=0.4.0",
     "mlx-embeddings>=0.1.0",
     "mlx-whisper>=0.4.0",
+    "laya-mlx>=0.1.0",
 ]
 dev = [
     "pytest>=8.0",

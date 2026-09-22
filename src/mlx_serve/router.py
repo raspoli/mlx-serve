@@ -32,6 +32,7 @@ _TYPE_CAPABILITIES: dict[str, list[str]] = {
     "embedding": ["embedding"],
     "tts": ["audio_speech"],
     "stt": ["audio_transcription"],
+    "decision": ["decision"],
 }
 
 
@@ -393,6 +394,15 @@ async def delete_model(model_id: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _merge_defaults(target: dict, defaults: dict) -> None:
+    """Recursively fill `target` with keys from `defaults` without overwriting existing values."""
+    for key, val in defaults.items():
+        if isinstance(val, dict) and isinstance(target.get(key), dict):
+            _merge_defaults(target[key], val)
+        elif key not in target:
+            target[key] = val
+
+
 @router.post("/chat/completions")
 async def chat_completions(request: Request) -> Any:
     try:
@@ -438,6 +448,9 @@ async def chat_completions(request: Request) -> Any:
     # mlx_lm.server validates the model field against the one it was started with —
     # rewrite it to the HuggingFace path so the request passes through.
     body["model"] = model_cfg.hf_path
+
+    if model_cfg.extra_body:
+        _merge_defaults(body, model_cfg.extra_body)
 
     target = f"http://127.0.0.1:{config.MLX_PORT}/v1/chat/completions"
 
@@ -835,6 +848,96 @@ async def get_memory_snapshot() -> dict:
 async def get_memory_timeline(last_n: int = 60) -> dict:
     """Memory history over time (sampled every 10s)."""
     return {"snapshots": metrics.get_memory_timeline(last_n=last_n)}
+
+
+# ---------------------------------------------------------------------------
+# POST /decisions  (Laya typed decision models)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/decisions")
+async def decisions(request: Request) -> dict:
+    """
+    Run a typed decision (Laya) model.
+
+    Body:
+      model: str  — model name from models.yaml
+      state: str | dict | list  — the input context (text, JSON object, or conversation list)
+      questions: dict  — typed questions following Laya schema:
+          {
+            "question_name": {
+              "type": "choice" | "score" | "noul",
+              "instructions": "...",
+              "criteria": ["opt1", "opt2"]  # for choice/score
+            }
+          }
+      keep_alive: str | null  — optional inactivity override
+
+    Returns the full Laya result dict including answers, probabilities, and token usage.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(
+            status_code=400, detail={"error": {"message": "Request body must be valid JSON"}}
+        )
+
+    model_name: str = body.get("model", "")
+    if model_name not in config.MODELS or config.MODELS[model_name].type != "decision":
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": {
+                    "message": f"Decision model not found: {model_name}",
+                    "code": 404,
+                }
+            },
+        )
+
+    state = body.get("state")
+    if state is None:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": {"message": "'state' field is required", "code": 400}},
+        )
+
+    questions = body.get("questions")
+    if not questions or not isinstance(questions, dict):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": {"message": "'questions' field must be a non-empty dict", "code": 400}},
+        )
+
+    keep_alive = _parse_keep_alive(body.get("keep_alive"))
+    if keep_alive is not None:
+        inline_manager.set_keep_alive(keep_alive)
+
+    logger.info(
+        f"POST /v1/decisions model={model_name} state_len={len(str(state))} questions={len(questions)}"
+    )
+    request_start = time.monotonic()
+
+    await process_manager.unload()
+    result = await inline_manager.generate_decision(model_name, state, questions)
+
+    total_ms = (time.monotonic() - request_start) * 1000
+    metrics.record_request(
+        metrics.RequestMetrics(
+            request_id=str(uuid.uuid4()),
+            model=model_name,
+            endpoint="/v1/decisions",
+            timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            started_at=request_start,
+            total_duration_ms=round(total_ms, 1),
+            status_code=200,
+        )
+    )
+
+    return {
+        "object": "decision",
+        "model": model_name,
+        **result,
+    }
 
 
 @router.get("/events")
